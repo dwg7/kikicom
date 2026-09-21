@@ -17,7 +17,12 @@
 #                         rewrites do not wear the SD card.
 #   $LOG_DIR/YYYY-MM-DD.jsonl
 #                         one JSON object per decoded position (UTC date),
-#                         from readsb's --net-json-port. Raw data: kept on the
+#                         from readsb's --net-json-port. With
+#                         --net-json-port-include-noposition it also gets
+#                         a line (no lat/lon) for aircraft heard only via
+#                         Mode S without an ADS-B position (e.g. many
+#                         helicopters / military): ICAO address, altitude,
+#                         squawk -- enough to know "it was up there". Raw data: kept on the
 #                         RPi / Mac mini role machine, never committed.
 #                         Finished days (UTC) are compressed to .jsonl.zst by
 #                         adsb-compress.timer (daily), ~1/10 the size.
@@ -99,7 +104,7 @@ Conflicts=kikimimi-record.service
 Type=simple
 User=${RUN_USER}
 RuntimeDirectory=adsb-research
-ExecStart=${READSB_BIN} --device-type rtlsdr --device ${DEVICE} --gain ${GAIN} --lat ${LAT} --lon ${LON} --write-json /run/adsb-research --write-json-every 5 --net --net-bind-address 127.0.0.1 --net-json-port ${JSON_PORT} --net-ro-size 8192 --quiet
+ExecStart=${READSB_BIN} --device-type rtlsdr --device ${DEVICE} --gain ${GAIN} --lat ${LAT} --lon ${LON} --write-json /run/adsb-research --write-json-every 5 --net --net-bind-address 127.0.0.1 --net-json-port ${JSON_PORT} --net-json-port-include-noposition --net-ro-size 8192 --quiet
 Restart=on-failure
 RestartSec=5
 

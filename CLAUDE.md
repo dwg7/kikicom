@@ -160,6 +160,11 @@ ssh m329.local 'bash -s uninstall' < scripts/install-adsb-service.sh
   1位置1行のJSON)を受けて、`~/adsb-log/YYYY-MM-DD.jsonl`(UTC日付)に
   追記する小さなPythonロガー(`/usr/local/lib/kikicom/adsb-logger.py`)。
   **これが蓄積データの正**
+- 2026-09-21 19:19 から`--net-json-port-include-noposition`を追加。ADS-Bの
+  位置を復調できず Mode S の応答だけ聞こえた機体も、位置なし(`lat`無し、
+  `"type":"mode_s"`、ICAOアドレス・高度・スコーク)で記録される。ヘリ・
+  自衛隊機の多くは ADS-B の位置を送らず Mode S のみとされるので、「上空に
+  いた」ことを残すため。量は最初の4分で32行中3行と小さい
 - ライブJSON: `/run/adsb-research/`(aircraft.json, stats.json等。
   `RuntimeDirectory=`によるtmpfs。数秒おきの書き換えでSDカードを
   傷めないため)。旧出力先`~/adsb-data/`は使っていない
