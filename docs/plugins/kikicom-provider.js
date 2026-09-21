@@ -19,6 +19,9 @@
   var SVG_NS = 'http://www.w3.org/2000/svg';
   var LIVE_MS = 10000;
   var TRACK_MS = 60000;
+  var BASEMAP_STYLE = 'https://stars.optgeo.org/style/bvmap-starlight';
+  var FONT_LATIN = ['Open Sans Bold'];
+  var FONT_JA = ['Noto Sans JP Regular'];
 
   // 高度(ft)→色。tar1090系と同じ「低いほど暖色、高いほど寒色」
   var ALT_STOPS = [0, '#ff4d4d', 2000, '#ff9f1c', 5000, '#ffd60a',
@@ -94,26 +97,9 @@
       center: [receiver.lon, receiver.lat - 0.25],
       zoom: 7.6,
       attributionControl: { compact: true },
-      style: {
-        version: 8,
-        glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
-        sources: {
-          gsi: {
-            type: 'raster',
-            tiles: ['https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png'],
-            tileSize: 256,
-            maxzoom: 18,
-            attribution: '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank">地理院タイル</a>'
-          }
-        },
-        layers: [
-          { id: 'bg', type: 'background', paint: { 'background-color': '#1b1d22' } },
-          {
-            id: 'gsi', type: 'raster', source: 'gsi',
-            paint: { 'raster-brightness-max': 0.55, 'raster-saturation': -0.7, 'raster-contrast': 0.1 }
-          }
-        ]
-      }
+      // 背景地図: bvmap-starlight(国土地理院最適化ベクトルタイルのグレースケール版、
+      // stars.optgeo.org の Martin が配信)。フォントも同じサーバーのものを使う
+      style: BASEMAP_STYLE
     });
     map.addControl(new maplibregl.NavigationControl({ showCompass: true }), 'top-right');
     map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-left');
@@ -128,22 +114,28 @@
       });
       map.addLayer({
         id: 'rings', type: 'line', source: 'rings',
-        paint: { 'line-color': '#8a8f99', 'line-width': 0.8, 'line-dasharray': [3, 3], 'line-opacity': 0.7 }
+        paint: { 'line-color': '#555a63', 'line-width': 1, 'line-dasharray': [3, 3], 'line-opacity': 0.8 }
       });
       map.addLayer({
         id: 'rings-label', type: 'symbol', source: 'rings',
         layout: {
           'symbol-placement': 'line', 'text-field': ['get', 'label'], 'text-size': 11,
-          'text-font': ['Open Sans Semibold']
+          'text-font': FONT_JA
         },
-        paint: { 'text-color': '#aab0bb', 'text-halo-color': '#1b1d22', 'text-halo-width': 1.2 }
+        paint: { 'text-color': '#444', 'text-halo-color': '#fff', 'text-halo-width': 1.5 }
       });
 
       map.addSource('tracks', { type: 'geojson', data: empty });
+      // 明るい背景地図の上で黄色系が埋もれないよう、暗い縁取りを下に敷く
+      map.addLayer({
+        id: 'tracks-casing', type: 'line', source: 'tracks',
+        layout: { 'line-join': 'round', 'line-cap': 'round' },
+        paint: { 'line-color': '#1b1d22', 'line-width': 3.2, 'line-opacity': 0.35 }
+      });
       map.addLayer({
         id: 'tracks', type: 'line', source: 'tracks',
         layout: { 'line-join': 'round', 'line-cap': 'round' },
-        paint: { 'line-color': altColorExpr('alt_max'), 'line-width': 1.4, 'line-opacity': 0.45 }
+        paint: { 'line-color': altColorExpr('alt_max'), 'line-width': 1.6, 'line-opacity': 0.9 }
       });
 
       map.addSource('points', { type: 'geojson', data: empty });
@@ -151,7 +143,8 @@
         id: 'points', type: 'circle', source: 'points',
         paint: {
           'circle-radius': ['interpolate', ['linear'], ['zoom'], 6, 1.2, 10, 2.5],
-          'circle-color': altColorExpr('alt'), 'circle-opacity': 0.8
+          'circle-color': altColorExpr('alt'), 'circle-opacity': 0.9,
+          'circle-stroke-color': '#1b1d22', 'circle-stroke-width': 0.3
         }
       });
 
@@ -161,7 +154,7 @@
       });
       map.addLayer({
         id: 'receiver', type: 'circle', source: 'receiver',
-        paint: { 'circle-radius': 5, 'circle-color': '#ffffff', 'circle-stroke-color': '#e63946', 'circle-stroke-width': 2 }
+        paint: { 'circle-radius': 5, 'circle-color': '#e63946', 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 2 }
       });
 
       map.addSource('live', { type: 'geojson', data: empty });
@@ -172,13 +165,13 @@
           'icon-rotate': ['coalesce', ['get', 'track'], 0],
           'icon-rotation-alignment': 'map', 'icon-allow-overlap': true,
           'text-field': ['coalesce', ['get', 'flight'], ''], 'text-size': 11,
-          'text-font': ['Open Sans Semibold'], 'text-offset': [0, 1.5], 'text-anchor': 'top',
+          'text-font': FONT_LATIN, 'text-offset': [0, 1.5], 'text-anchor': 'top',
           'text-optional': true
         },
         paint: {
           'icon-color': altColorExpr('alt'),
-          'icon-halo-color': '#000', 'icon-halo-width': 1,
-          'text-color': '#f0f0f0', 'text-halo-color': '#000', 'text-halo-width': 1.2
+          'icon-halo-color': '#1b1d22', 'icon-halo-width': 1.5,
+          'text-color': '#1b1d22', 'text-halo-color': '#fff', 'text-halo-width': 1.5
         }
       });
 
@@ -312,7 +305,7 @@
     root.appendChild(el('h1', 'kikicom-title', 'kikicom 上空ダッシュボード'));
     root.appendChild(el('p', 'kikicom-subtitle',
       '月寒(札幌市豊平区)の受信機(RTL-SDR + readsb、1090MHz ADS-B)が捉えた航空機。' +
-      '白丸が受信点(約1km精度)、破線は 25/50/100km。受信率は周辺機の2〜4割で、南東(新千歳方面)が最もよく見える。'));
+      '赤丸が受信点(約1km精度)、破線は 25/50/100km。受信率は周辺機の2〜4割で、南東(新千歳方面)が最もよく見える。'));
     root.appendChild(el('div', 'kikicom-banner',
       'ローカル試作:公的機・自衛隊機の区分と公開粒度の方針(人のレビュー)が決まるまで公開しない。'));
 
