@@ -241,23 +241,43 @@ ICAOアドレス`846682` → 登録番号**JA13HC**、機種**ATR 42-600**、
 
 ---
 
-## 5. アーキテクチャ方針(一部着手)
+## 5. アーキテクチャと運用(一部稼働中)
 
 ### 役割分担はkikimimiと同じパターンを踏襲する
 
 ```
 RPi 4B (m329.local)
-  → readsb でADS-Bを継続受信するだけ。**gitチェックアウトはしない**
-    (kikimimiでも「RPiはキャプチャに徹する」という一貫した方針。
-    RPiはリソースが限られ、/tmpがtmpfsで容量制限があることも
-    実際に踏み抜いて確認済み)
-Mac mini役の機体(slate.local)
-  → SSH経由でRPiのreadsb出力を定期取得し、GeoJSONへ変換、
-    GitHub Pagesへpush(kikimimiのsync-segments.sh / publish-live-data.sh
-    と同じパターンを想定)
-開発用のこのMac
-  → コード開発・gitコミット
+  → readsb でADS-Bを継続受信し、~/adsb-log/ に日次JSONLで蓄積するだけ。
+    **gitチェックアウトはしない**(kikimimiでも「RPiはキャプチャに徹する」
+    という一貫した方針。RPiはリソースが限られ、/tmpがtmpfsで容量制限が
+    あることも実際に踏み抜いて確認済み)
+slate.local(Mac mini役 兼 開発機。Claude Codeが動いているのはこの機体)
+  → 開発・gitコミット
+  → RPiの位置ログを15分おきにrsyncで取得(稼働中、下記)
+  → (未着手)GeoParquetアーカイブ・GeoJSON変換・GitHub Pagesへpush
 ```
+
+**slate は開発機と Mac mini 役を兼ねている**(2026-09-21判明)。
+kikimimi の LaunchAgent(`com.dwg7.kikimimi.*`)もここで動いている。
+本リポジトリのcheckoutは外付けボリューム(`/Volumes/Migrate-2025-04/github/kikicom`)
+にあり、**macOSのTCC(プライバシー保護)によりlaunchdエージェントは外付け
+ボリューム上のファイルを実行できない**("Operation not permitted")。
+そのため定期実行するスクリプトは`~/.local/lib/kikicom/`へコピーして
+そこから実行する(スクリプトを編集したら install を再実行すること)。
+
+### 継続受信とデータの置き場所(2026-09-21 17:50〜稼働)
+
+| 場所 | 内容 | 仕組み |
+|---|---|---|
+| RPi `~/adsb-log/YYYY-MM-DD.jsonl` | 当日分(UTC日付)の位置ログ、1位置1行 | `adsb-logger.service` |
+| RPi `~/adsb-log/*.jsonl.zst` | 確定した過去日の圧縮版(約1/10) | `adsb-compress.timer`(毎日09:30 JST = UTC日付が変わった後) |
+| slate `~/kikicom-data/adsb-log/` | RPiのミラー(RPiのSDだけにデータがある状態を避ける) | `com.dwg7.kikicom.sync-adsb-log`(LaunchAgent、15分おき、`scripts/install-sync-timer.sh`) |
+
+- 同期ログ: `~/Library/Logs/kikicom/sync-adsb-log.log`
+- **2026-09-21 17:50 以降が、アンテナ位置を固定した「平常時の基準線」の
+  始まり**(窓際・二重窓閉め・約20cm下げた位置、ゲイン49.6dB)。それ以前の
+  データは設置の試行錯誤を含むので、基準線の計算からは除くこと
+- 見込み容量:未圧縮で数十MB/日、圧縮後は数MB/日。RPiのSD空き約22GB
 
 ### 可視化はMapLibre GL JSを推奨
 
@@ -282,7 +302,7 @@ Mac mini役の機体(slate.local)
 
 - [x] コンセプト確立(ADS-B受信・地理空間可視化、kikimimiの姉妹プロジェクト)
 - [x] ハードウェア実証(受信・復調・位置特定・機体照会まで一気通貫で確認)
-- [x] ゲイン・アンテナの実測による最適化(屋外設置・垂直偏波・7cm・40dB前後)
+- [x] ゲイン・アンテナの実測による最適化(窓際・垂直偏波・7cm・49.6dB)
 - [x] 法的・倫理的な整理(ADS-Bは放送に近い性質、軍用機のみ要配慮)
 - [x] 可視化方針の検討(MapLibre GL JS)
 - [x] `adsb-research.service`を本リポジトリの管理下に移す
@@ -290,12 +310,13 @@ Mac mini役の機体(slate.local)
 - [x] `aircraft.json`のライブ更新不具合の原因調査(ifileモードの仮想時計。
   readsbをRTL-SDR対応でビルドして解決)
 - [x] 位置データの蓄積(`adsb-logger.service` → `~/adsb-log/*.jsonl`)
-- [ ] 受信感度の改善(アンテナ設置位置。夕方に二重窓の間・吸盤取付モードへ
-  移行予定。手すり上端より高い位置を推奨)
-- [ ] RPi→Mac mini役の機体への定期データ取得スクリプト
-  (`sync-adsb-data.sh`的なもの)
-- [ ] GeoJSON変換ロジック
-- [ ] 軍用機フィルタリングロジック(**公開経路を作る前に必須**)
+- [x] アンテナ設置位置の確定(窓際・二重窓閉めで受信率約22%。2026-09-21 17:50固定)
+- [x] RPi→slateへの定期データ取得(`scripts/sync-adsb-log.sh`、15分おき)
+- [x] RPi上の過去日ログの日次圧縮(`adsb-compress.timer`)
+- [ ] 平常時の基準線の指標設計(新千歳の時間別発着流量など。雪害シーズン前に)
+- [ ] GeoParquetアーカイブ(slate、非公開)とGeoJSON変換(公開候補)
+- [ ] 公的機・自衛隊機の区分と公開粒度の方針(ADRとして。人のレビュー必須)
+- [ ] 上記方針に基づくフィルタリングロジック(**公開経路を作る前に必須**)
 - [ ] MapLibreでの可視化ページ試作
 - [ ] GitHub Pagesでの公開方針の確定(kikimimiのADR 0016と同じパターンを
   想定、ただし本プロジェクト独自のADRとして記録すること)

@@ -19,6 +19,8 @@
 #                         one JSON object per decoded position (UTC date),
 #                         from readsb's --net-json-port. Raw data: kept on the
 #                         RPi / Mac mini role machine, never committed.
+#                         Finished days (UTC) are compressed to .jsonl.zst by
+#                         adsb-compress.timer (daily), ~1/10 the size.
 set -euo pipefail
 
 ACTION="${1:-install}"
@@ -26,6 +28,10 @@ UNIT_NAME="adsb-research.service"
 LOGGER_UNIT_NAME="adsb-logger.service"
 UNIT_PATH="/etc/systemd/system/${UNIT_NAME}"
 LOGGER_UNIT_PATH="/etc/systemd/system/${LOGGER_UNIT_NAME}"
+COMPRESS_NAME="adsb-compress"
+COMPRESS_SERVICE_PATH="/etc/systemd/system/${COMPRESS_NAME}.service"
+COMPRESS_TIMER_PATH="/etc/systemd/system/${COMPRESS_NAME}.timer"
+COMPRESS_SCRIPT_PATH="/usr/local/lib/kikicom/adsb-compress.sh"
 LOGGER_PATH="/usr/local/lib/kikicom/adsb-logger.py"
 RUN_USER="$(id -un)"
 
@@ -118,7 +124,39 @@ RestartSec=5
 WantedBy=${UNIT_NAME}
 EOF_UNIT
 
+    sudo tee "$COMPRESS_SCRIPT_PATH" > /dev/null <<EOF_SH
+#!/bin/sh
+# Compress finished (not today's UTC) daily logs; skip files touched <10min ago.
+today=\$(date -u +%Y-%m-%d)
+find "${LOG_DIR}" -maxdepth 1 -name '*.jsonl' ! -name "\${today}.jsonl" -mmin +10 \\
+  -exec zstd -q -10 --rm {} +
+EOF_SH
+    sudo chmod 0755 "$COMPRESS_SCRIPT_PATH"
+
+    sudo tee "$COMPRESS_SERVICE_PATH" > /dev/null <<EOF_UNIT
+[Unit]
+Description=kikicom: zstd-compress finished daily ADS-B position logs
+
+[Service]
+Type=oneshot
+User=${RUN_USER}
+ExecStart=${COMPRESS_SCRIPT_PATH}
+EOF_UNIT
+
+    sudo tee "$COMPRESS_TIMER_PATH" > /dev/null <<EOF_UNIT
+[Unit]
+Description=kikicom: daily compression of ADS-B position logs
+
+[Timer]
+OnCalendar=*-*-* 09:30:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF_UNIT
+
     sudo systemctl daemon-reload
+    sudo systemctl enable --now "${COMPRESS_NAME}.timer"
     sudo systemctl enable "$UNIT_NAME" "$LOGGER_UNIT_NAME"
     sudo systemctl restart "$UNIT_NAME"
     sudo systemctl restart "$LOGGER_UNIT_NAME"
@@ -130,8 +168,8 @@ EOF_UNIT
     echo "  sudo systemctl disable --now $UNIT_NAME && sudo systemctl enable --now kikimimi-record.service"
     ;;
   uninstall)
-    sudo systemctl disable --now "$LOGGER_UNIT_NAME" "$UNIT_NAME" 2>/dev/null || true
-    sudo rm -f "$UNIT_PATH" "$LOGGER_UNIT_PATH" "$LOGGER_PATH"
+    sudo systemctl disable --now "${COMPRESS_NAME}.timer" "$LOGGER_UNIT_NAME" "$UNIT_NAME" 2>/dev/null || true
+    sudo rm -f "$UNIT_PATH" "$LOGGER_UNIT_PATH" "$LOGGER_PATH" "$COMPRESS_SERVICE_PATH" "$COMPRESS_TIMER_PATH" "$COMPRESS_SCRIPT_PATH"
     sudo systemctl daemon-reload
     echo "stopped and removed: $UNIT_PATH, $LOGGER_UNIT_PATH (logs in $LOG_DIR kept)"
     ;;
@@ -145,6 +183,8 @@ ac = d["aircraft"]
 print(f"age {time.time() - d['now']:.0f}s, messages {d['messages']}, "
       f"aircraft {len(ac)} ({sum('lat' in a for a in ac)} with position)")
 PY
+    echo "--- compression timer ---"
+    systemctl list-timers "${COMPRESS_NAME}.timer" --no-pager || true
     echo "--- position logs ---"
     ls -l "$LOG_DIR" | tail -5 || true
     ;;
