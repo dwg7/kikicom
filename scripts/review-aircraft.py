@@ -151,6 +151,7 @@ def review(day):
         "ヘリコプター(区分A7)": [],
         "Mode Sのみ(ADS-Bの位置なし)": [],
         "航空会社の便名形式でないコールサイン": [],
+        "有視界飛行(スコーク1200)・便名なしの一般航空(測量・報道・訓練・自家用など)": [],
     }
     for a in ac.values():
         db = a["db"]
@@ -166,6 +167,10 @@ def review(day):
             sections["Mode Sのみ(ADS-Bの位置なし)"].append(a)
         if a["flights"] and not all(AIRLINE_CALLSIGN.match(f) for f in a["flights"]):
             sections["航空会社の便名形式でないコールサイン"].append(a)
+        # 例:2026-09-22 08:10 丘珠発のアジア航測 C208(JA13AJ)。登録はあり、所有者名に官公庁の語は
+        # なく、便名も送らないので上の区分のどれにも入らなかった
+        if "1200" in a["squawks"] or (db and not a["flights"] and a["npos"] > 0):
+            sections["有視界飛行(スコーク1200)・便名なしの一般航空(測量・報道・訓練・自家用など)"].append(a)
 
     def line(a):
         db = a["db"] or {}
