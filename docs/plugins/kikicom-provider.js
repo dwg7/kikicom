@@ -740,6 +740,63 @@
     }
   };
 
+  // 「機体」フォルダの中身を自動更新する composition provider。
+  // Open MCT の CompositionCollection は provider に on/off があれば 'add'/'remove'
+  // を購読するので、表示中(購読者がいる間)だけ index を定期的に読み直し、
+  // 新しく現れた機体を add、24時間の窓から外れた機体を remove として通知する。
+  var aircraftComposition = (function () {
+    var listeners = { add: [], remove: [], reorder: [] };
+    var known = null;  // 通知済みの key の集合
+    var timer = null;
+
+    function ident(key) { return { namespace: NAMESPACE, key: 'ac-' + key }; }
+    function count() { return listeners.add.length + listeners.remove.length; }
+    function emit(event, identifier) {
+      listeners[event].forEach(function (l) { l.callback.call(l.context, identifier); });
+    }
+
+    function poll() {
+      indexCache.at = 0;
+      fetchIndex().then(function (list) {
+        if (!known) { return; }
+        var now = {};
+        list.forEach(function (a) { now[a.key] = true; });
+        list.forEach(function (a) {
+          if (!known[a.key]) { known[a.key] = true; emit('add', ident(a.key)); }
+        });
+        Object.keys(known).forEach(function (k) {
+          if (!now[k]) { delete known[k]; emit('remove', ident(k)); }
+        });
+      });
+    }
+
+    return {
+      appliesTo: function (o) {
+        return o.identifier.namespace === NAMESPACE && o.identifier.key === 'aircraft';
+      },
+      load: function () {
+        return fetchIndex().then(function (list) {
+          known = {};
+          list.forEach(function (a) { known[a.key] = true; });
+          return list.map(function (a) { return ident(a.key); });
+        });
+      },
+      on: function (domainObject, event, callback, context) {
+        listeners[event].push({ callback: callback, context: context });
+        if (!timer && count() > 0) { timer = setInterval(poll, TRACK_MS); }
+      },
+      off: function (domainObject, event, callback, context) {
+        listeners[event] = listeners[event].filter(function (l) {
+          return !(l.callback === callback && l.context === context);
+        });
+        if (timer && count() === 0) { clearInterval(timer); timer = null; }
+      },
+      // 読み取り専用(利用者がフォルダを編集することはない)
+      add: function () {}, remove: function () {}, reorder: function () {},
+      includes: function (o, id) { return !!known && id.key.indexOf('ac-') === 0 && !!known[id.key.slice(3)]; }
+    };
+  })();
+
   var objectProvider = {
     get: function (identifier) {
       var key = identifier.key;
@@ -756,9 +813,9 @@
       if (key === 'aircraft') {
         return fetchIndex().then(function (list) {
           return {
-            identifier: identifier, name: '機体(直近24時間)', type: 'folder',
+            identifier: identifier, name: '機体(直近24時間、初観測順)', type: 'folder',
             location: NAMESPACE + ':' + ROOT_KEY,
-            composition: list.slice().reverse().map(function (a) { return { namespace: NAMESPACE, key: 'ac-' + a.key }; })
+            composition: list.map(function (a) { return { namespace: NAMESPACE, key: 'ac-' + a.key }; })
           };
         });
       }
@@ -850,6 +907,7 @@
     });
     openmct.objectViews.addProvider(dashboardViewProvider);
     openmct.objectViews.addProvider(timelineViewProvider);
+    openmct.composition.addProvider(aircraftComposition);
     openmct.objectViews.addProvider(aircraftViewProvider);
   };
 })();
