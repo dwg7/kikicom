@@ -279,6 +279,13 @@ kikimimi の LaunchAgent(`com.dwg7.kikimimi.*`)もここで動いている。
 ボリューム上のファイルを実行できない**("Operation not permitted")。
 そのため定期実行するスクリプトは`~/.local/lib/kikicom/`へコピーして
 そこから実行する(スクリプトを編集したら install を再実行すること)。
+さらに、**macOSの「ローカルネットワーク」プライバシー保護により、launchd配下で
+Homebrewの(フレームワーク版)python3から起動したsshはRPiに "No route to host" で
+拒否される**(bash や rsync から起動した ssh は通る。2026-09-21実測)。RPiに ssh する
+定期ジョブは bash のスクリプトを入口にし、Python にはファイルで渡すこと
+(例:`scripts/coverage-record.sh` → `coverage-check.py --ours-file`)。
+LaunchAgent の登録は共通の `scripts/install-launch-agent.sh` に集約し、
+`install-{sync,review,coverage}-timer.sh` はその薄い呼び出し。
 
 ### 継続受信とデータの置き場所(2026-09-21 17:50〜稼働)
 
@@ -288,6 +295,7 @@ kikimimi の LaunchAgent(`com.dwg7.kikimimi.*`)もここで動いている。
 | RPi `~/adsb-log/*.jsonl.zst` | 確定した過去日の圧縮版(約1/10) | `adsb-compress.timer`(毎日09:30 JST = UTC日付が変わった後) |
 | slate `~/kikicom-data/adsb-log/` | RPiのミラー(RPiのSDだけにデータがある状態を避ける) | `com.dwg7.kikicom.sync-adsb-log`(LaunchAgent、15分おき、`scripts/install-sync-timer.sh`) |
 
+| slate `~/kikicom-data/coverage/` | **受信率の定点観測**(15分おき、adsb.lol 半径100nm比)。`YYYY-MM-DD.tsv` は機体ごと(距離・方位・仰角・受信可否・RSSI)、`summary.tsv` は回ごとの受信率(ssh失敗は NA で残す)。受信環境の変化(結露・凍結・アンテナ移動)の監視と「窓の視界」地図の材料。adsb.lol は ODbL なので内部利用のみ | `com.dwg7.kikicom.coverage-check`(`scripts/install-coverage-timer.sh`、入口は `coverage-record.sh`) |
 | slate `~/kikicom-data/review/YYYY-MM-DD.md` | 「要確認の機体」日次一覧(公用機候補・日本ブロックで登録不明かつ定期便名なし・ヘリA7・Mode Sのみ・非定期便コールサイン) | `com.dwg7.kikicom.review-aircraft`(LaunchAgent、毎時、`scripts/install-review-timer.sh`)。登録照会は adsbdb、キャッシュ `~/kikicom-data/adsbdb-cache.json`(7日) |
 
 - 同期ログ: `~/Library/Logs/kikicom/sync-adsb-log.log`
