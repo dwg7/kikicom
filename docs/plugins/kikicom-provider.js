@@ -160,6 +160,7 @@
       map.addSource('live', { type: 'geojson', data: empty });
       map.addLayer({
         id: 'live', type: 'symbol', source: 'live',
+        filter: ['!', ['to-boolean', ['get', 'watch']]],
         layout: {
           'icon-image': 'plane', 'icon-size': 0.55,
           'icon-rotate': ['coalesce', ['get', 'track'], 0],
@@ -175,14 +176,38 @@
         }
       });
 
-      ['live', 'tracks'].forEach(function (layer) {
+      // 注目機(scripts/watchlist.json、航空測量の同業など):★と橙色。★は日本語フォントにしかない
+      map.addLayer({
+        id: 'live-watch', type: 'symbol', source: 'live',
+        filter: ['to-boolean', ['get', 'watch']],
+        layout: {
+          'icon-image': 'plane', 'icon-size': 0.7,
+          'icon-rotate': ['coalesce', ['get', 'track'], 0],
+          'icon-rotation-alignment': 'map', 'icon-allow-overlap': true,
+          'text-field': ['concat', '★ ', ['coalesce', ['get', 'reg'], ['get', 'flight'], ['get', 'hex']]],
+          'text-size': 13, 'text-font': FONT_JA, 'text-offset': [0, 1.6], 'text-anchor': 'top',
+          'text-allow-overlap': true
+        },
+        paint: {
+          'icon-color': altColorExpr('alt'),
+          'icon-halo-color': '#ff7f0e', 'icon-halo-width': 3,
+          'text-color': '#c45a00', 'text-halo-color': '#fff', 'text-halo-width': 2
+        }
+      });
+
+      ['live', 'live-watch', 'tracks'].forEach(function (layer) {
         map.on('click', layer, function (e) {
           var p = e.features[0].properties;
           // 便名などは電波で受けた値なので、innerHTML に連結せず DOM で組み立てる
           // (kikimimi と同じ方針)
           var box = el('div');
-          box.appendChild(el('b', null, p.flight || '(便名なし)'));
+          box.appendChild(el('b', null, (p.watch ? '★ ' : '') + (p.flight || p.reg || '(便名なし)')));
           box.appendChild(document.createTextNode(' ' + p.hex + (p.country ? ' / ' + p.country : '')));
+          if (p.reg || p.owner) {
+            box.appendChild(el('br'));
+            box.appendChild(document.createTextNode([p.reg, p.type, p.owner].filter(Boolean).join(' / ') +
+              (p.watch ? '(' + p.watch + ')' : '')));
+          }
           box.appendChild(el('br'));
           box.appendChild(document.createTextNode(layer === 'live'
             ? '高度 ' + fmt(p.alt, 0, 'ft') + ' / ' + fmt(p.gs, 0, 'kt') + ' / 距離 ' + fmt(p.dst_km, 1, 'km')
@@ -286,18 +311,19 @@
     }
     var table = el('table', 'kikicom-table');
     var head = el('tr');
-    ['便名', 'ICAO', '国', '高度ft', '昇降ft/分', '速度kt', '距離km', '方位', 'RSSI'].forEach(function (h) {
+    ['便名', '登録', 'ICAO', '国', '高度ft', '昇降ft/分', '速度kt', '距離km', '方位', 'RSSI'].forEach(function (h) {
       head.appendChild(el('th', null, h));
     });
     table.appendChild(head);
     rows.forEach(function (r) {
       var tr = el('tr');
-      [r.flight || '—', r.hex, r.country || '—', fmt(r.alt), fmt(r.rate), fmt(r.gs),
+      [(r.watch ? '★ ' : '') + (r.flight || '—'), r.reg || '—', r.hex, r.country || '—', fmt(r.alt), fmt(r.rate), fmt(r.gs),
         fmt(r.dst_km, 1), fmt(r.dir, 0, '°'), fmt(r.rssi, 1)].forEach(function (v) {
         tr.appendChild(el('td', null, v));
       });
-      tr.className = 'kikicom-pass-row';
-      tr.title = 'クリックでこの機体のページへ';
+      tr.className = 'kikicom-pass-row' + (r.watch ? ' kikicom-watch-row' : '');
+      if (r.watch) { tr.title = r.watch + ':' + [r.reg, r.type, r.owner].filter(Boolean).join(' / '); }
+      if (!r.watch) { tr.title = 'クリックでこの機体のページへ'; }
       tr.addEventListener('click', function () {
         window.location.hash = aircraftPath(r.hex.replace(/[^0-9a-z]/gi, '').toLowerCase());
       });
@@ -568,7 +594,7 @@
   }
 
   function aircraftLabel(a) {
-    return (a.flights && a.flights.length ? a.flights.join('/') : '(便名なし)') + ' ' + a.hex;
+    return (a.flights && a.flights.length ? a.flights.join('/') : (a.reg || '(便名なし)')) + ' ' + a.hex;
   }
 
   function aircraftPath(key) {
@@ -616,8 +642,8 @@
       var y = top + i * rowH;
       var row = svgEl('g', { class: 'kikicom-timeline-row' });
       row.appendChild(svgEl('rect', { x: 0, y: y, width: width, height: rowH, class: 'kikicom-timeline-hit' }));
-      var name = svgEl('text', { x: 4, y: y + 13, class: 'kikicom-timeline-label' });
-      name.textContent = (a.flights[0] || '—') + '  ' + a.hex + (a.country ? '  ' + a.country : '');
+      var name = svgEl('text', { x: 4, y: y + 13, class: 'kikicom-timeline-label' + (a.watch ? ' kikicom-timeline-watch' : '') });
+      name.textContent = (a.watch ? '★ ' : '') + (a.flights[0] || a.reg || '—') + '  ' + a.hex + (a.country ? '  ' + a.country : '');
       row.appendChild(name);
       a.passes.forEach(function (p) {
         var bx = x(p.t0), bw = Math.max(x(p.t1) - bx, 3);
@@ -815,9 +841,13 @@
 
       function draw() {
         var s = data.series, range = rangeOf();
-        root.querySelector('.kikicom-title').textContent = aircraftLabel(data);
+        root.querySelector('.kikicom-title').textContent = (data.watch ? '★ ' : '') + aircraftLabel(data);
+        var wb = root.querySelector('.kikicom-watch-banner');
+        wb.style.display = data.watch ? '' : 'none';
+        wb.textContent = data.watch ? '★ ' + data.watch + ':' + [data.reg, data.type, data.owner].filter(Boolean).join(' / ') : '';
         root.querySelector('.kikicom-subtitle').textContent =
-          [data.country || '国籍不明', data.category ? '区分 ' + data.category : null,
+          [data.reg ? data.reg + (data.type ? '(' + data.type + ')' : '') : null, data.owner || null,
+            data.country || '国籍不明', data.category ? '区分 ' + data.category : null,
             data.squawk ? 'スコーク ' + data.squawk : null,
             '初観測 ' + hhmmss(s.t[0]), '最終観測 ' + hhmmss(s.t[s.t.length - 1])].filter(Boolean).join(' / ');
 
@@ -872,6 +902,7 @@
           root = el('div', 'kikicom-dashboard');
           root.appendChild(el('h1', 'kikicom-title', domainObject.name));
           root.appendChild(el('p', 'kikicom-subtitle', '読み込み中…'));
+          root.appendChild(el('div', 'kikicom-watch-banner'));
           root.appendChild(el('div', 'kikicom-banner',
             'ローカル試作:公的機・自衛隊機の区分と公開粒度の方針(人のレビュー)が決まるまで公開しない。'));
           parts = { cards: el('div', 'kikicom-lad-row') };
@@ -996,7 +1027,7 @@
           var a = list.filter(function (x) { return 'ac-' + x.key === key; })[0];
           return {
             identifier: identifier, type: 'kikicom.aircraft', location: NAMESPACE + ':aircraft',
-            name: a ? ((a.flights[0] || '(便名なし)') + ' ' + a.hex + (a.country ? ' ' + a.country : '')) : key.slice(3)
+            name: a ? ((a.watch ? '★ ' : '') + (a.flights[0] || a.reg || '(便名なし)') + ' ' + a.hex + (a.country ? ' ' + a.country : '')) : key.slice(3)
           };
         });
       }

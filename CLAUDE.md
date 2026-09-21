@@ -214,6 +214,16 @@ ssh m329.local 'bash -s uninstall' < scripts/install-adsb-service.sh
 常用(二重窓の間・吸盤取付)に十分。ベランダより窓際が良いのは、南東
 (新千歳方面)の見通しという方向の効果が大きい。
 
+### 注目機:航空測量(同業)
+
+ユーザーの関心上、**航空測量の機体は重要**(C208 などは同業の可能性が高い)。
+`scripts/watchlist.json`(機種・所有者名の部分一致・登録記号)に一致した機体は、要確認一覧の
+先頭区分と、ダッシュボード(地図の★と橙、表・タイムライン・機体ページの強調)に出る。
+登録情報は adsbdb(`~/kikicom-data/adsbdb-cache.json` を review-aircraft.py と共有)。
+最初の例:**2026-09-22 08:10、JA13AJ(C208、アジア航測)が丘珠から西へ離陸**
+(スコーク1200、有視界飛行)。台風一過の晴れた祝日の朝。これをきっかけに要確認一覧へ
+「有視界飛行・便名なしの一般航空」区分も追加した(運航者コードで航空会社機を除外)。
+
 ### 災害日の記録(基準線と比べるときは除外 or 別扱い)
 
 - **2026-09-21(月・敬老の日、シルバーウィーク中)夕方〜夜:台風25号が関東甲信に
@@ -324,7 +334,7 @@ LaunchAgent の登録は共通の `scripts/install-launch-agent.sh` に集約し
 | slate `~/kikicom-data/adsb-log/` | RPiのミラー(RPiのSDだけにデータがある状態を避ける) | `com.dwg7.kikicom.sync-adsb-log`(LaunchAgent、15分おき、`scripts/install-sync-timer.sh`) |
 
 | slate `~/kikicom-data/coverage/` | **受信率の定点観測**(15分おき、adsb.lol 半径100nm比)。`YYYY-MM-DD.tsv` は機体ごと(距離・方位・仰角・受信可否・RSSI)、`summary.tsv` は回ごとの受信率(ssh失敗は NA で残す)。受信環境の変化(結露・凍結・アンテナ移動)の監視と「窓の視界」地図の材料。adsb.lol は ODbL なので内部利用のみ | `com.dwg7.kikicom.coverage-check`(`scripts/install-coverage-timer.sh`、入口は `coverage-record.sh`) |
-| slate `~/kikicom-data/review/YYYY-MM-DD.md` | 「要確認の機体」日次一覧(公用機候補・日本ブロックで登録不明かつ定期便名なし・ヘリA7・Mode Sのみ・非定期便コールサイン) | `com.dwg7.kikicom.review-aircraft`(LaunchAgent、毎時、`scripts/install-review-timer.sh`)。登録照会は adsbdb、キャッシュ `~/kikicom-data/adsbdb-cache.json`(7日) |
+| slate `~/kikicom-data/review/YYYY-MM-DD.md` | 「要確認の機体」日次一覧(**先頭は注目機 `scripts/watchlist.json`**・公用機候補・日本ブロックで登録不明かつ定期便名なし・ヘリA7・Mode Sのみ・非定期便コールサイン) | `com.dwg7.kikicom.review-aircraft`(LaunchAgent、毎時、`scripts/install-review-timer.sh`)。登録照会は adsbdb、キャッシュ `~/kikicom-data/adsbdb-cache.json`(7日) |
 
 - 同期ログ: `~/Library/Logs/kikicom/sync-adsb-log.log`
 - **2026-09-22 07:44 以降が「平常時の基準線」の始まり**(窓際・二重窓閉め・20cm上げた

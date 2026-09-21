@@ -18,7 +18,7 @@ Outputs (docs/data/, gitignored -- LOCAL PROTOTYPE ONLY):
 NOT FOR PUBLICATION: no military / public-agency filtering is applied yet.
 Publishing needs the reviewed classification policy first (CLAUDE.md).
 """
-import argparse, datetime, glob, json, os, subprocess, time
+import argparse, datetime, glob, json, os, subprocess, time, urllib.request
 from collections import defaultdict
 
 HOME = os.path.expanduser("~")
@@ -39,6 +39,75 @@ ICAO_BLOCKS = [
     (0x100000, 0x1FFFFF, "ロシア"), (0x3C0000, 0x3FFFFF, "ドイツ"),
     (0x400000, 0x43FFFF, "英国"), (0x460000, 0x467FFF, "フィンランド"),
 ]
+
+
+ADSBDB_CACHE = os.path.join(HOME, "kikicom-data", "adsbdb-cache.json")
+WATCHLIST = os.path.join(os.path.dirname(os.path.abspath(__file__)), "watchlist.json")
+
+
+class Registry:
+    """adsbdb registration lookups, sharing review-aircraft.py's cache.
+    Only aircraft currently in the air are fetched (a few per run); others use the cache."""
+
+    def __init__(self, max_fetch=3):
+        try:
+            with open(ADSBDB_CACHE) as f:
+                self.cache = json.load(f)
+        except (OSError, ValueError):
+            self.cache = {}
+        try:
+            with open(WATCHLIST) as f:
+                self.watch = json.load(f)
+        except (OSError, ValueError):
+            self.watch = {"label": "注目", "icao_types": [], "owner_keywords": [], "registrations": []}
+        self.left = max_fetch
+        self.dirty = False
+
+    def get(self, hexcode, fetch=False):
+        c = self.cache.get(hexcode)
+        if c is not None:
+            return c.get("aircraft")
+        if not fetch or self.left <= 0 or hexcode.startswith("~"):
+            return None
+        self.left -= 1
+        aircraft = None
+        try:
+            req = urllib.request.Request(f"https://api.adsbdb.com/v0/aircraft/{hexcode}",
+                                         headers={"User-Agent": "kikicom build-viz-data"})
+            resp = json.load(urllib.request.urlopen(req, timeout=5)).get("response")
+            aircraft = resp.get("aircraft") if isinstance(resp, dict) else None
+        except urllib.error.HTTPError as e:
+            if e.code != 404:
+                return None
+        except Exception:
+            return None
+        self.cache[hexcode] = {"at": time.time(), "aircraft": aircraft}
+        self.dirty = True
+        return aircraft
+
+    def info(self, hexcode, fetch=False):
+        db = self.get(hexcode, fetch) or {}
+        owner = (db.get("registered_owner") or "")
+        w = self.watch
+        watched = bool(db) and (db.get("icao_type") in w.get("icao_types", [])
+                                or db.get("registration") in w.get("registrations", [])
+                                or any(k.lower() in owner.lower() for k in w.get("owner_keywords", [])))
+        return {"reg": db.get("registration"), "type": db.get("icao_type"), "owner": owner or None,
+                "watch": w.get("label") if watched else None}
+
+    def save(self):
+        if not self.dirty:
+            return
+        try:  # merge with whatever review-aircraft.py wrote meanwhile
+            with open(ADSBDB_CACHE) as f:
+                disk = json.load(f)
+        except (OSError, ValueError):
+            disk = {}
+        disk.update(self.cache)
+        tmp = ADSBDB_CACHE + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(disk, f, ensure_ascii=False)
+        os.replace(tmp, ADSBDB_CACHE)
 
 
 def country(hexcode):
@@ -152,7 +221,7 @@ def phase(alts):
     return "上昇" if d > 1000 else "降下" if d < -1000 else "巡航"
 
 
-def build_aircraft(rows):
+def build_aircraft(rows, reg=None):
     """Per-aircraft columnar series + an index with passes (last 24h)."""
     by_hex = defaultdict(list)
     for r in rows:
@@ -179,11 +248,12 @@ def build_aircraft(rows):
                            "dst_min": min(ds) if ds else None,
                            "phase": phase(alts)})
         key = "".join(c for c in hexcode if c.isalnum()).lower()
-        index.append({"hex": hexcode, "key": key, "flights": flights,
+        info = reg.info(hexcode) if reg else {}
+        index.append({"hex": hexcode, "key": key, "flights": flights, **info,
                       "country": country(hexcode), "first": int(rs[0]["now"]),
                       "last": int(rs[-1]["now"]), "n": len(rs), "passes": passes})
         files[key] = {
-            "hex": hexcode, "flights": flights, "country": country(hexcode),
+            "hex": hexcode, "flights": flights, "country": country(hexcode), **info,
             "category": next((r["category"] for r in reversed(rs) if r.get("category")), None),
             "squawk": next((r["squawk"] for r in reversed(rs) if r.get("squawk")), None),
             "passes": passes,
@@ -328,6 +398,7 @@ def main():
     args = ap.parse_args()
     now = time.time()
 
+    reg = Registry()
     aircraft = ssh_json(args.host, "/run/adsb-research/aircraft.json")
     rstats = ssh_json(args.host, "/run/adsb-research/stats.json")
 
@@ -336,7 +407,7 @@ def main():
         if "lat" not in a or a.get("seen_pos", 999) > 60:
             continue
         props = {"hex": a["hex"], "flight": (a.get("flight") or "").strip(),
-                 "country": country(a["hex"]), "alt": alt_of(a),
+                 "country": country(a["hex"]), "alt": alt_of(a), **reg.info(a["hex"], fetch=True),
                  "gs": a.get("gs"), "track": a.get("track", 0),
                  "rate": a.get("baro_rate", a.get("geom_rate")),
                  "dst_km": round(a["r_dst"] * 1.852, 1) if "r_dst" in a else None,
@@ -384,7 +455,7 @@ def main():
         write_json("coverage.json", cov)
         stats["coverage"] = {"last": cov["last"], "rate_24h": cov["rate_24h"],
                              "samples_24h": cov["samples_24h"], "missing_24h": cov["missing_24h"]}
-        index, files = build_aircraft(rows)
+        index, files = build_aircraft(rows, reg)
         ac_dir = os.path.join(OUT_DIR, "aircraft")
         os.makedirs(ac_dir, exist_ok=True)
         for key, obj in files.items():
@@ -398,6 +469,7 @@ def main():
                            "aircraft": len({r["hex"] for r in win}),
                            "tracks": len(tracks)}
     write_json("stats.json", stats)
+    reg.save()
     print(f"live {len(live)} | window {stats.get('window')}")
 
 

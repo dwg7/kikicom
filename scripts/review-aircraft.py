@@ -36,6 +36,27 @@ PUBLIC_WORDS = [
 ]
 
 
+WATCHLIST = os.path.join(os.path.dirname(os.path.abspath(__file__)), "watchlist.json")
+
+
+def load_watchlist():
+    try:
+        with open(WATCHLIST) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {"label": "注目", "icao_types": [], "owner_keywords": [], "registrations": []}
+
+
+def watched(db, watch):
+    """True if adsbdb's record matches the watchlist (type, owner keyword or registration)."""
+    if not db:
+        return False
+    owner_name = (db.get("registered_owner") or "").lower()
+    return (db.get("icao_type") in watch.get("icao_types", [])
+            or db.get("registration") in watch.get("registrations", [])
+            or any(k.lower() in owner_name for k in watch.get("owner_keywords", [])))
+
+
 def jst_day_bounds(day):
     start = datetime.datetime.strptime(day, "%Y-%m-%d").replace(tzinfo=JST)
     return start.timestamp(), (start + datetime.timedelta(days=1)).timestamp()
@@ -145,7 +166,10 @@ def review(day):
         db = a["db"] or {}
         return " ".join(filter(None, [db.get("registered_owner"), db.get("registered_owner_operator_flag_code")]))
 
+    watch = load_watchlist()
+    watch_title = f"★ {watch['label']}(scripts/watchlist.json:機種・所有者名・登録記号)"
     sections = {
+        watch_title: [],
         "公用機の候補(所有者名に官公庁らしい語)": [],
         "日本のブロックで登録不明・定期便の便名なし(自衛隊・官公庁・新規登録の候補)": [],
         "ヘリコプター(区分A7)": [],
@@ -155,6 +179,8 @@ def review(day):
     }
     for a in ac.values():
         db = a["db"]
+        if watched(db, watch):
+            sections[watch_title].append(a)
         if db and any(w in owner(a) for w in PUBLIC_WORDS):
             sections["公用機の候補(所有者名に官公庁らしい語)"].append(a)
         # adsbdb に載っていない定期便も多いので、航空会社の便名を送った機体は除く
