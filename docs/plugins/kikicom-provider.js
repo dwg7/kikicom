@@ -370,6 +370,15 @@
       });
       svg.insertBefore(svgEl('path', { d: d, class: cls }), svg.firstChild.nextSibling);
     }
+    // アンテナ位置を変えた時刻に縦線(documents/antenna-placements.tsv)
+    ((cov && cov.placements) || []).forEach(function (p) {
+      if (p.t < t0 || p.t > t1) { return; }
+      svg.appendChild(svgEl('line', { x1: x(p.t), x2: x(p.t), y1: m.top, y2: m.top + ph, class: 'kikicom-cov-placement' }));
+      var tl = svgEl('text', { x: x(p.t) + 3, y: m.top + 10, class: 'kikicom-cov-placement-label' });
+      tl.textContent = '位置変更 ' + hhmm(p.t);
+      tl.appendChild(svgEl('title')).textContent = p.label + ':' + p.note;
+      svg.appendChild(tl);
+    });
     line('low', 'kikicom-cov-low');
     line('rate', 'kikicom-cov-all');
     series.forEach(function (p) {
@@ -395,7 +404,9 @@
     container.textContent = '';
     var grid = (cov && cov.grid) || [];
     if (!grid.length) {
-      container.appendChild(el('p', 'kikicom-caption', 'まだ定点観測の記録がありません。'));
+      container.appendChild(el('p', 'kikicom-caption', cov && cov.grid_since
+        ? '現在のアンテナ位置(' + hhmm(cov.grid_since) + '〜)での定点観測の記録はまだありません。15分ごとに増えます。'
+        : 'まだ定点観測の記録がありません。'));
       return;
     }
     var bins = cov.elev_bins, nE = bins.length;
@@ -439,7 +450,12 @@
       t.textContent = label;
       svg.appendChild(t);
     });
+    var since = cov.grid_since ? new Date(cov.grid_since * 1000) : null;
     container.appendChild(svg);
+    if (since) {
+      container.appendChild(el('p', 'kikicom-caption kikicom-polar-since',
+        '現在のアンテナ位置(' + (since.getMonth() + 1) + '/' + since.getDate() + ' ' + hhmm(cov.grid_since) + '〜)のデータのみ'));
+    }
   }
 
   function buildDashboard(container) {
@@ -465,7 +481,7 @@
     covPanel.appendChild(el('h2', 'kikicom-panel-title', '受信環境(adsb.lol に見えている機体のうち、何割を受信できたか)'));
     var covRow = el('div', 'kikicom-two-col');
     var covSeries = el('div');
-    var covPolar = el('div', 'kikicom-polar-wrap');
+    var covPolar = el('div', 'kikicom-polar-wrap kikicom-polar-col');
     covRow.appendChild(covSeries);
     covRow.appendChild(covPolar);
     covPanel.appendChild(covRow);

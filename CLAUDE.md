@@ -327,9 +327,11 @@ LaunchAgent の登録は共通の `scripts/install-launch-agent.sh` に集約し
 | slate `~/kikicom-data/review/YYYY-MM-DD.md` | 「要確認の機体」日次一覧(公用機候補・日本ブロックで登録不明かつ定期便名なし・ヘリA7・Mode Sのみ・非定期便コールサイン) | `com.dwg7.kikicom.review-aircraft`(LaunchAgent、毎時、`scripts/install-review-timer.sh`)。登録照会は adsbdb、キャッシュ `~/kikicom-data/adsbdb-cache.json`(7日) |
 
 - 同期ログ: `~/Library/Logs/kikicom/sync-adsb-log.log`
-- **2026-09-21 17:50 以降が、アンテナ位置を固定した「平常時の基準線」の
-  始まり**(窓際・二重窓閉め・約20cm下げた位置、ゲイン49.6dB)。それ以前の
-  データは設置の試行錯誤を含むので、基準線の計算からは除くこと
+- **2026-09-22 07:44 以降が「平常時の基準線」の始まり**(窓際・二重窓閉め・20cm上げた
+  位置、ゲイン49.6dB)。「低い仰角が勝負」という理解から、前日夕方の低い位置から上げた。
+  2026-09-21 17:50〜09-22 07:44 は旧位置(約20cm低い)で、台風の夜を含む。
+  **アンテナ位置の履歴は `documents/antenna-placements.tsv`**(ダッシュボードの受信率
+  グラフに縦線、「窓の視界」は現在位置の期間だけで集計)。位置を変えたら必ず追記すること
 - 見込み容量:未圧縮で数十MB/日、圧縮後は数MB/日。RPiのSD空き約22GB
 
 ### 可視化はMapLibre GL JSを推奨
@@ -363,7 +365,8 @@ LaunchAgent の登録は共通の `scripts/install-launch-agent.sh` に集約し
 - [x] `aircraft.json`のライブ更新不具合の原因調査(ifileモードの仮想時計。
   readsbをRTL-SDR対応でビルドして解決)
 - [x] 位置データの蓄積(`adsb-logger.service` → `~/adsb-log/*.jsonl`)
-- [x] アンテナ設置位置の確定(窓際・二重窓閉めで受信率約22%。2026-09-21 17:50固定)
+- [x] アンテナ設置位置の確定(窓際・二重窓閉め。2026-09-22 07:44 に20cm上げて固定。履歴は `documents/antenna-placements.tsv`)
+- [ ] 20cm上げた効果の検証(旧位置 09-21 17:50〜09-22 07:44 と、同じ時間帯・曜日どうしで仰角2°未満の受信率を比べる)
 - [x] RPi→slateへの定期データ取得(`scripts/sync-adsb-log.sh`、15分おき)
 - [x] RPi上の過去日ログの日次圧縮(`adsb-compress.timer`)
 - [ ] 平常時の基準線の指標設計(新千歳の時間別発着流量など。雪害シーズン前に)

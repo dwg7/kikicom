@@ -211,8 +211,28 @@ ELEV_BINS = [(-90, 2, "<2°"), (2, 4, "2–4°"), (4, 8, "4–8°"), (8, 91, "8�
 BRG_STEP = 30
 
 
+PLACEMENTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "documents", "antenna-placements.tsv")
+
+
+def read_placements():
+    """Antenna placement history (documents/antenna-placements.tsv): [(epoch, label, note)]."""
+    out = []
+    if os.path.exists(PLACEMENTS):
+        with open(PLACEMENTS) as f:
+            next(f, None)
+            for line in f:
+                c = line.rstrip("\n").split("\t")
+                if len(c) >= 2 and c[0]:
+                    t = datetime.datetime.strptime(c[0], "%Y-%m-%dT%H:%M").replace(tzinfo=JST).timestamp()
+                    out.append((int(t), c[1], c[2] if len(c) > 2 else ""))
+    return out
+
+
 def build_coverage(now, days=7):
-    """Receive-rate time series (last 48h) and a bearing x elevation grid (last N days)."""
+    """Receive-rate time series (last 48h) and a bearing x elevation grid (last N days,
+    current antenna placement only: mixing placements would defeat the comparison)."""
+    placements = read_placements()
+    since_placement = placements[-1][0] if placements else 0
     series = []
     path = os.path.join(COVERAGE_DIR, "summary.tsv")
     if os.path.exists(path):
@@ -243,6 +263,9 @@ def build_coverage(now, days=7):
                 c = line.rstrip("\n").split("\t")
                 if len(c) < 9:
                     continue
+                t = datetime.datetime.strptime(c[0], "%Y-%m-%dT%H:%M").replace(tzinfo=JST).timestamp()
+                if t < since_placement:
+                    continue
                 brg, elev, seen = float(c[6]), float(c[7]), c[8] == "1"
                 b = int(brg // BRG_STEP) % (360 // BRG_STEP)
                 e = next(k for k, (lo, hi, _) in enumerate(ELEV_BINS) if lo <= elev < hi)
@@ -255,6 +278,8 @@ def build_coverage(now, days=7):
     last = valid[-1] if valid else None
     day_ago = [x for x in valid if x["t"] >= now - 24 * 3600]
     return {"series": series, "elev_bins": [b[2] for b in ELEV_BINS], "brg_step": BRG_STEP,
+            "placements": [{"t": t, "label": l, "note": n} for t, l, n in placements],
+            "grid_since": since_placement,
             "grid_days": days, "grid": cells, "last": last,
             "rate_24h": (sum(x["ours"] for x in day_ago) / sum(x["public"] for x in day_ago))
             if day_ago and sum(x["public"] for x in day_ago) else None,

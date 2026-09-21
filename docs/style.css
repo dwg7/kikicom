@@ -81,3 +81,7 @@
 .kikicom-polar-ring { fill: none; stroke: #555; stroke-width: 0.7; }
 .kikicom-polar-label { fill: #ccc; font-size: 13px; font-weight: bold; }
 .kikicom-polar-ringlabel { fill: #aaa; font-size: 10px; }
+.kikicom-cov-placement { stroke: #e74c3c; stroke-width: 1.2; stroke-dasharray: 3, 2; }
+.kikicom-cov-placement-label { fill: #e74c3c; font-size: 11px; }
+.kikicom-polar-col { flex-direction: column; align-items: center; }
+.kikicom-polar-since { margin: 4px 0 0; text-align: center; }
