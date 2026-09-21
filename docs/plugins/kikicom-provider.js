@@ -353,22 +353,26 @@
       lbl.textContent = (d.getMonth() + 1) + '/' + d.getDate() + ' ' + hhmm(t);
       svg.appendChild(lbl);
     });
+    // 線は直近1時間の合計による率(rate_1h / low_1h)。点は回ごとの率(薄く)
     function line(key, cls) {
       var d = '', pen = false, prevT = null;
       series.forEach(function (p) {
-        var v = key === 'rate' ? p.rate : (p.low_public ? p.low_ours / p.low_public : null);
+        var inst = key === 'rate' ? p.rate : (p.low_public ? p.low_ours / p.low_public : null);
+        if (inst != null) {
+          var c = svgEl('circle', { cx: x(p.t), cy: y(inst), r: 2, class: cls + '-pt' });
+          c.appendChild(svgEl('title')).textContent = hhmm(p.t) + ' ' +
+            (key === 'rate' ? '全体 ' + p.ours + '/' + p.public : '仰角4°未満 ' + p.low_ours + '/' + p.low_public) +
+            '(半径' + p.radius + 'nm)';
+          svg.appendChild(c);
+        }
+        var v = key === 'rate' ? p.rate_1h : p.low_1h;
         if (v == null) { pen = false; return; }
         if (prevT !== null && p.t - prevT > GAP) { pen = false; }
         prevT = p.t;
         d += (pen ? 'L' : 'M') + x(p.t).toFixed(1) + ',' + y(v).toFixed(1);
         pen = true;
-        var c = svgEl('circle', { cx: x(p.t), cy: y(v), r: 2.5, class: cls + '-pt' });
-        c.appendChild(svgEl('title')).textContent = hhmm(p.t) + ' ' +
-          (key === 'rate' ? '全体 ' + p.ours + '/' + p.public : '仰角4°未満 ' + p.low_ours + '/' + p.low_public) +
-          '(半径' + p.radius + 'nm)';
-        svg.appendChild(c);
       });
-      svg.insertBefore(svgEl('path', { d: d, class: cls }), svg.firstChild.nextSibling);
+      svg.appendChild(svgEl('path', { d: d, class: cls }));
     }
     // アンテナ位置を変えた時刻に縦線(documents/antenna-placements.tsv)
     ((cov && cov.placements) || []).forEach(function (p) {
@@ -382,7 +386,7 @@
     line('low', 'kikicom-cov-low');
     line('rate', 'kikicom-cov-all');
     series.forEach(function (p) {
-      if (p.rate == null) {
+      if (p.missing) {
         var r = svgEl('rect', { x: x(p.t) - 2, y: m.top + ph - 6, width: 4, height: 6, class: 'kikicom-cov-missing' });
         r.appendChild(svgEl('title')).textContent = hhmm(p.t) + ' 欠測(RPiに接続できず)';
         svg.appendChild(r);
@@ -486,7 +490,7 @@
     covRow.appendChild(covPolar);
     covPanel.appendChild(covRow);
     covPanel.appendChild(el('p', 'kikicom-caption',
-      '15分ごとの定点観測(半径100nm)。取り逃がした機体も分母に入るので、受信強度の平均と違い生存者バイアスがない。' +
+      '15分ごとの定点観測(半径100nm)。線は直近1時間の合計による率、薄い点は回ごとの率(夜は分母が少なく大きく揺れる)。取り逃がした機体も分母に入るので、受信強度の平均と違い生存者バイアスがない。' +
       '右は「窓の視界」:中心が真上、外側ほど低い仰角(遠い機体)。色は受信率(赤0%→黄50%→緑100%)、淡いほど標本が少ない。' +
       '急な低下は、運航の乱れより先に結露・凍結・アンテナの移動を疑う。'));
     root.appendChild(covPanel);
@@ -497,7 +501,7 @@
     var plotBody = el('div');
     plotPanel.appendChild(plotBody);
     plotPanel.appendChild(el('p', 'kikicom-caption',
-      '雪害検知の基準線になる系列。基準線の起点は 2026-09-21 17:50(アンテナ位置を固定した時刻)。'));
+      '雪害検知の基準線になる系列。基準線の起点は 2026-09-22 07:44(アンテナを20cm上げて固定した時刻。履歴は documents/antenna-placements.tsv)。'));
     row.appendChild(plotPanel);
 
     var tablePanel = el('div', 'kikicom-panel');

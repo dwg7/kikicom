@@ -245,12 +245,22 @@ def build_coverage(now, days=7):
                 t = datetime.datetime.strptime(c[0], "%Y-%m-%dT%H:%M").replace(tzinfo=JST).timestamp()
                 if t < now - 48 * 3600:
                     continue
-                na = c[3] == "NA"
+                # ssh 失敗(NA)と、分母が0(周りに機体がいない)は「率なし」として扱う
+                na = c[3] == "NA" or c[2] == "0"
                 series.append({"t": int(t), "radius": int(c[1]), "public": int(c[2]),
+                               "missing": c[3] == "NA",
                                "ours": None if na else int(c[3]),
                                "rate": None if na else float(c[4]),
                                "low_public": None if na else int(c[5]),
                                "low_ours": None if na else int(c[6])})
+    # 直近1時間の合計で率を出す(夜は分母が1〜3機しかなく、回ごとの値は0%と100%を行き来する)
+    for x in series:
+        win = [y for y in series if x["t"] - 3600 < y["t"] <= x["t"] and y["ours"] is not None]
+        pub = sum(y["public"] for y in win)
+        lowp = sum(y["low_public"] for y in win)
+        x["rate_1h"] = sum(y["ours"] for y in win) / pub if pub else None
+        x["low_1h"] = sum(y["low_ours"] for y in win) / lowp if lowp else None
+        x["public_1h"] = pub
     grid = {}
     for i in range(days):
         day = datetime.datetime.fromtimestamp(now - i * 86400, JST).strftime("%Y-%m-%d")

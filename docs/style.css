@@ -68,9 +68,9 @@
 
 /* 受信環境パネル */
 .kikicom-cov-all { fill: none; stroke: #5dade2; stroke-width: 2; }
-.kikicom-cov-all-pt { fill: #5dade2; }
+.kikicom-cov-all-pt { fill: #5dade2; opacity: 0.35; }
 .kikicom-cov-low { fill: none; stroke: #e67e22; stroke-width: 1.5; stroke-dasharray: 4, 3; }
-.kikicom-cov-low-pt { fill: #e67e22; }
+.kikicom-cov-low-pt { fill: #e67e22; opacity: 0.35; }
 .kikicom-cov-missing { fill: #888; }
 .kikicom-cov-all-key { background: #5dade2; }
 .kikicom-cov-low-key { background: #e67e22; }
