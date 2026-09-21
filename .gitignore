@@ -1,0 +1,9 @@
+# 生データはコミットしない(CLAUDE.md「リポジトリの方針」)
+*.jsonl
+*.jsonl.gz
+*.jsonl.zst
+*.u8
+*.iq
+adsb-data/
+adsb-log/
+.DS_Store
