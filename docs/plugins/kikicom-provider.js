@@ -295,6 +295,11 @@
         fmt(r.dst_km, 1), fmt(r.dir, 0, '°'), fmt(r.rssi, 1)].forEach(function (v) {
         tr.appendChild(el('td', null, v));
       });
+      tr.className = 'kikicom-pass-row';
+      tr.title = 'クリックでこの機体のページへ';
+      tr.addEventListener('click', function () {
+        window.location.hash = aircraftPath(r.hex.replace(/[^0-9a-z]/gi, '').toLowerCase());
+      });
       table.appendChild(tr);
     });
     container.appendChild(table);
@@ -349,17 +354,424 @@
     return { cards: cards, mapEl: mapEl, plotBody: plotBody, tableBody: tableBody, footer: footer };
   }
 
+  // ---------------------------------------------------------------------------
+  // 機体ごとのビュー(タイムライン・機体ページ)
+  // ---------------------------------------------------------------------------
+  var GAP_SEC = 600; // scripts/build-viz-data.py と同じ、通過の区切り
+
+  // 高度→色(ALT_STOPS の線形補間)。SVG 用
+  function altColor(alt) {
+    if (alt == null) { return '#888'; }
+    for (var i = 0; i < ALT_STOPS.length - 2; i += 2) {
+      var a0 = ALT_STOPS[i], a1 = ALT_STOPS[i + 2];
+      if (alt <= a1) {
+        var f = Math.max(0, Math.min(1, (alt - a0) / (a1 - a0)));
+        return mixHex(ALT_STOPS[i + 1], ALT_STOPS[i + 3], f);
+      }
+    }
+    return ALT_STOPS[ALT_STOPS.length - 1];
+  }
+
+  function mixHex(c0, c1, f) {
+    var a = parseInt(c0.slice(1), 16), b = parseInt(c1.slice(1), 16);
+    var r = Math.round(((a >> 16) & 255) * (1 - f) + ((b >> 16) & 255) * f);
+    var g = Math.round(((a >> 8) & 255) * (1 - f) + ((b >> 8) & 255) * f);
+    var bl = Math.round((a & 255) * (1 - f) + (b & 255) * f);
+    return '#' + ((1 << 24) + (r << 16) + (g << 8) + bl).toString(16).slice(1);
+  }
+
+  function hhmm(t) {
+    var d = new Date(t * 1000);
+    return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  }
+
+  function hhmmss(t) {
+    return new Date(t * 1000).toLocaleTimeString('ja-JP');
+  }
+
+  function durationLabel(sec) {
+    if (sec < 60) { return Math.round(sec) + '秒'; }
+    if (sec < 3600) { return Math.round(sec / 60) + '分'; }
+    return (sec / 3600).toFixed(1) + '時間';
+  }
+
+  function aircraftLabel(a) {
+    return (a.flights && a.flights.length ? a.flights.join('/') : '(便名なし)') + ' ' + a.hex;
+  }
+
+  function aircraftPath(key) {
+    return '#/browse/' + NAMESPACE + ':' + ROOT_KEY + '/' + NAMESPACE + ':aircraft/' + NAMESPACE + ':ac-' + key;
+  }
+
+  var indexCache = { at: 0, promise: null };
+  function fetchIndex() {
+    if (!indexCache.promise || Date.now() - indexCache.at > 60000) {
+      indexCache.at = Date.now();
+      indexCache.promise = fetchJson('data/aircraft/index.json').then(function (d) {
+        return (d && d.aircraft) || [];
+      });
+    }
+    return indexCache.promise;
+  }
+
+  // 全機体のタイムライン(1機1行、通過ごとの横棒、色は平均高度)
+  function renderTimeline(container, list) {
+    container.textContent = '';
+    if (!list.length) {
+      container.appendChild(el('p', 'kikicom-caption', 'まだ機体の記録がありません。'));
+      return;
+    }
+    var now = Date.now() / 1000;
+    var tMin = Math.min.apply(null, list.map(function (a) { return a.first; }));
+    tMin = Math.floor(tMin / 3600) * 3600;
+    var tMax = now;
+    var labelW = 190, width = Math.max(container.clientWidth || 900, 600), rowH = 18, top = 24;
+    var plotW = width - labelW - 12;
+    var height = top + list.length * rowH + 8;
+    var x = function (t) { return labelW + ((t - tMin) / (tMax - tMin)) * plotW; };
+    var svg = svgEl('svg', { width: width, height: height, class: 'kikicom-timeline-svg', role: 'img',
+      'aria-label': '機体ごとの観測タイムライン' });
+
+    for (var h = Math.ceil(tMin / 3600) * 3600; h <= tMax; h += 3600) {
+      svg.appendChild(svgEl('line', { x1: x(h), x2: x(h), y1: top - 4, y2: height, class: 'kikicom-plot-grid' }));
+      var tl = svgEl('text', { x: x(h), y: top - 8, class: 'kikicom-plot-axis', 'text-anchor': 'middle' });
+      tl.textContent = new Date(h * 1000).getHours() + '時';
+      svg.appendChild(tl);
+    }
+    svg.appendChild(svgEl('line', { x1: x(now), x2: x(now), y1: top - 4, y2: height, class: 'kikicom-timeline-now' }));
+
+    list.forEach(function (a, i) {
+      var y = top + i * rowH;
+      var row = svgEl('g', { class: 'kikicom-timeline-row' });
+      row.appendChild(svgEl('rect', { x: 0, y: y, width: width, height: rowH, class: 'kikicom-timeline-hit' }));
+      var name = svgEl('text', { x: 4, y: y + 13, class: 'kikicom-timeline-label' });
+      name.textContent = (a.flights[0] || '—') + '  ' + a.hex + (a.country ? '  ' + a.country : '');
+      row.appendChild(name);
+      a.passes.forEach(function (p) {
+        var bx = x(p.t0), bw = Math.max(x(p.t1) - bx, 3);
+        var bar = svgEl('rect', { x: bx, y: y + 3, width: bw, height: rowH - 6, rx: 2,
+          fill: altColor(p.alt_mean), class: 'kikicom-timeline-bar' });
+        bar.appendChild(svgEl('title')).textContent =
+          aircraftLabel(a) + '\n' + hhmmss(p.t0) + '–' + hhmmss(p.t1) + '(' + durationLabel(p.t1 - p.t0) + ')\n' +
+          p.phase + ' ' + fmt(p.alt0) + '→' + fmt(p.alt1) + 'ft / 最接近 ' + fmt(p.dst_min, 1, 'km') + ' / ' + p.n + '点';
+        row.appendChild(bar);
+      });
+      row.addEventListener('click', function () { window.location.hash = aircraftPath(a.key); });
+      svg.appendChild(row);
+    });
+    container.appendChild(svg);
+  }
+
+  var timelineViewProvider = {
+    key: 'kikicom.timeline.view',
+    name: '機体タイムライン',
+    canView: function (o) { return o.type === 'kikicom.timeline'; },
+    view: function () {
+      var root, body, timer;
+      function refresh() {
+        indexCache.at = 0;
+        fetchIndex().then(function (list) {
+          if (!body) { return; }
+          var sub = root.querySelector('.kikicom-subtitle');
+          sub.textContent = '直近24時間に位置を受信した ' + list.length + ' 機。横棒は1回の通過' +
+            '(10分以上途切れたら別の通過)、色は平均高度。行をクリックするとその機体のページへ。';
+          renderTimeline(body, list);
+        });
+      }
+      return {
+        show: function (element) {
+          root = el('div', 'kikicom-dashboard');
+          root.appendChild(el('h1', 'kikicom-title', '機体タイムライン'));
+          root.appendChild(el('p', 'kikicom-subtitle', ''));
+          var panel = el('div', 'kikicom-panel');
+          body = el('div', 'kikicom-timeline-wrap');
+          panel.appendChild(body);
+          renderLegend(panel);
+          root.appendChild(panel);
+          element.appendChild(root);
+          refresh();
+          timer = setInterval(refresh, TRACK_MS);
+        },
+        destroy: function () { clearInterval(timer); body = undefined; root = undefined; }
+      };
+    }
+  };
+
+  // 時系列の小さなグラフ(通過の切れ目では線を切る)
+  function renderSeries(container, spec, s, range) {
+    var idx = [];
+    for (var i = 0; i < s.t.length; i += 1) {
+      if (s.t[i] >= range[0] && s.t[i] <= range[1] && s[spec.key][i] != null) { idx.push(i); }
+    }
+    var panel = el('div', 'kikicom-series');
+    panel.appendChild(el('div', 'kikicom-series-title', spec.label + '(' + spec.unit + ')'));
+    if (!idx.length) {
+      panel.appendChild(el('p', 'kikicom-caption', 'データなし'));
+      container.appendChild(panel);
+      return;
+    }
+    var vals = idx.map(function (i) { return s[spec.key][i]; });
+    var vMin = Math.min.apply(null, vals), vMax = Math.max.apply(null, vals);
+    if (spec.zero) { vMin = Math.min(vMin, 0); vMax = Math.max(vMax, 0); }
+    if (vMax - vMin < (spec.minSpan || 1)) {
+      var mid = (vMax + vMin) / 2; vMin = mid - (spec.minSpan || 1) / 2; vMax = mid + (spec.minSpan || 1) / 2;
+    }
+    var width = 700, height = 120, m = { top: 8, right: 10, bottom: 20, left: 52 };
+    var pw = width - m.left - m.right, ph = height - m.top - m.bottom;
+    var x = function (t) { return m.left + ((t - range[0]) / Math.max(range[1] - range[0], 1)) * pw; };
+    var y = function (v) { return m.top + ph - ((v - vMin) / (vMax - vMin)) * ph; };
+    var svg = svgEl('svg', { viewBox: '0 0 ' + width + ' ' + height, class: 'kikicom-plot-svg' });
+    [vMin, (vMin + vMax) / 2, vMax].forEach(function (v) {
+      svg.appendChild(svgEl('line', { x1: m.left, x2: width - m.right, y1: y(v), y2: y(v), class: 'kikicom-plot-grid' }));
+      var t = svgEl('text', { x: m.left - 6, y: y(v) + 4, class: 'kikicom-plot-axis', 'text-anchor': 'end' });
+      t.textContent = Math.round(v);
+      svg.appendChild(t);
+    });
+    if (spec.zero && vMin < 0 && vMax > 0) {
+      svg.appendChild(svgEl('line', { x1: m.left, x2: width - m.right, y1: y(0), y2: y(0), class: 'kikicom-series-zero' }));
+    }
+    [range[0], (range[0] + range[1]) / 2, range[1]].forEach(function (t, k) {
+      var lbl = svgEl('text', { x: x(t), y: height - 4, class: 'kikicom-plot-axis',
+        'text-anchor': k === 0 ? 'start' : k === 2 ? 'end' : 'middle' });
+      lbl.textContent = hhmmss(t);
+      svg.appendChild(lbl);
+    });
+    var d = '', prevT = null;
+    idx.forEach(function (i) {
+      var cmd = (prevT === null || s.t[i] - prevT > GAP_SEC) ? 'M' : 'L';
+      d += cmd + x(s.t[i]).toFixed(1) + ',' + y(s[spec.key][i]).toFixed(1);
+      prevT = s.t[i];
+    });
+    svg.appendChild(svgEl('path', { d: d, class: 'kikicom-series-line' }));
+    idx.forEach(function (i) {
+      svg.appendChild(svgEl('circle', { cx: x(s.t[i]), cy: y(s[spec.key][i]), r: 2,
+        fill: spec.key === 'alt' ? altColor(s.alt[i]) : '#5dade2' }));
+    });
+    panel.appendChild(svg);
+    container.appendChild(panel);
+  }
+
+  var SERIES_SPECS = [
+    { key: 'alt', label: '気圧高度', unit: 'ft', minSpan: 500 },
+    { key: 'rate', label: '昇降率', unit: 'ft/分', zero: true, minSpan: 500 },
+    { key: 'gs', label: '対地速度', unit: 'kt', minSpan: 20 },
+    { key: 'dst', label: '受信点からの距離', unit: 'km', minSpan: 5 },
+    { key: 'rssi', label: '受信強度', unit: 'dBFS', minSpan: 3 },
+    { key: 'oat', label: '外気温(Comm-B由来)', unit: '℃', minSpan: 3 },
+    { key: 'ws', label: '風速(Comm-B由来)', unit: 'kt', minSpan: 5 }
+  ];
+
+  // 機体の航跡を高度で色分けした線分に分解する(通過の切れ目では線を切る)
+  function trackSegments(s, range) {
+    var feats = [];
+    for (var i = 1; i < s.t.length; i += 1) {
+      if (s.t[i] < range[0] || s.t[i - 1] > range[1] || s.t[i] - s.t[i - 1] > GAP_SEC) { continue; }
+      feats.push({ type: 'Feature',
+        geometry: { type: 'LineString', coordinates: [[s.lon[i - 1], s.lat[i - 1]], [s.lon[i], s.lat[i]]] },
+        properties: { alt: s.alt[i] } });
+    }
+    return { type: 'FeatureCollection', features: feats };
+  }
+
+  function createAircraftMap(container, data, range, receiver) {
+    var map = new maplibregl.Map({ container: container, style: BASEMAP_STYLE,
+      center: [receiver.lon, receiver.lat], zoom: 8, attributionControl: { compact: true } });
+    map.addControl(new maplibregl.NavigationControl(), 'top-right');
+    map.on('load', function () {
+      // 高度で色を変えるため2点ずつの短い線分にしているので、簡略化(tolerance)で
+      // 低ズーム時に線分が捨てられないよう 0 にする
+      map.addSource('seg', { type: 'geojson', data: trackSegments(data.series, range), tolerance: 0 });
+      map.addLayer({ id: 'seg-casing', type: 'line', source: 'seg', layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': '#1b1d22', 'line-width': 5, 'line-opacity': 0.35 } });
+      map.addLayer({ id: 'seg', type: 'line', source: 'seg', layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': altColorExpr('alt'), 'line-width': 3 } });
+      map.addSource('rx', { type: 'geojson',
+        data: { type: 'Feature', geometry: { type: 'Point', coordinates: [receiver.lon, receiver.lat] }, properties: {} } });
+      map.addLayer({ id: 'rx', type: 'circle', source: 'rx',
+        paint: { 'circle-radius': 5, 'circle-color': '#e63946', 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } });
+      fitAircraft(map, data.series, range, receiver);
+    });
+    return map;
+  }
+
+  function fitAircraft(map, s, range, receiver) {
+    var b = new maplibregl.LngLatBounds([receiver.lon, receiver.lat], [receiver.lon, receiver.lat]);
+    for (var i = 0; i < s.t.length; i += 1) {
+      if (s.t[i] >= range[0] && s.t[i] <= range[1]) { b.extend([s.lon[i], s.lat[i]]); }
+    }
+    map.fitBounds(b, { padding: 40, maxZoom: 11, duration: 0 });
+  }
+
+  function renderPassTable(container, passes, selected, onSelect) {
+    container.textContent = '';
+    var table = el('table', 'kikicom-table');
+    var head = el('tr');
+    ['#', '時刻', '長さ', '判定', '高度ft(始→終)', '最接近km', '点数'].forEach(function (h) { head.appendChild(el('th', null, h)); });
+    table.appendChild(head);
+    passes.forEach(function (p, i) {
+      var tr = el('tr', 'kikicom-pass-row' + (i === selected ? ' kikicom-pass-selected' : ''));
+      [String(i + 1), hhmmss(p.t0) + '–' + hhmmss(p.t1), durationLabel(p.t1 - p.t0), p.phase,
+        fmt(p.alt0) + '→' + fmt(p.alt1), fmt(p.dst_min, 1), String(p.n)].forEach(function (v) {
+        tr.appendChild(el('td', null, v));
+      });
+      tr.addEventListener('click', function () { onSelect(i); });
+      table.appendChild(tr);
+    });
+    var all = el('tr', 'kikicom-pass-row' + (selected === -1 ? ' kikicom-pass-selected' : ''));
+    var td = el('td', null, '全ての通過をまとめて表示');
+    td.colSpan = 7;
+    all.appendChild(td);
+    all.addEventListener('click', function () { onSelect(-1); });
+    table.appendChild(all);
+    container.appendChild(table);
+  }
+
+  var aircraftViewProvider = {
+    key: 'kikicom.aircraft.view',
+    name: '機体モニター',
+    canView: function (o) { return o.type === 'kikicom.aircraft'; },
+    view: function (domainObject) {
+      var root, map, timer, data, selected = null, parts;
+      var key = domainObject.identifier.key.replace(/^ac-/, '');
+
+      function rangeOf() {
+        var p = data.passes;
+        if (selected === -1 || !p.length) { return [data.series.t[0], data.series.t[data.series.t.length - 1]]; }
+        var q = p[selected];
+        return [q.t0 - 5, q.t1 + 5];
+      }
+
+      function draw() {
+        var s = data.series, range = rangeOf();
+        root.querySelector('.kikicom-title').textContent = aircraftLabel(data);
+        root.querySelector('.kikicom-subtitle').textContent =
+          [data.country || '国籍不明', data.category ? '区分 ' + data.category : null,
+            data.squawk ? 'スコーク ' + data.squawk : null,
+            '初観測 ' + hhmmss(s.t[0]), '最終観測 ' + hhmmss(s.t[s.t.length - 1])].filter(Boolean).join(' / ');
+
+        parts.cards.textContent = '';
+        var alts = s.alt.filter(function (v) { return v != null; });
+        var dsts = s.dst.filter(function (v) { return v != null; });
+        [
+          ['通過回数', String(data.passes.length), '直近24時間'],
+          ['位置の受信数', String(s.t.length), '最後の受信 ' + durationLabel(Date.now() / 1000 - s.t[s.t.length - 1]) + '前'],
+          ['高度の範囲', alts.length ? Math.min.apply(null, alts) + '–' + Math.max.apply(null, alts) : '—', 'ft'],
+          ['最接近', dsts.length ? Math.min.apply(null, dsts).toFixed(1) : '—', 'km(受信点から)']
+        ].forEach(function (c) {
+          var card = el('div', 'kikicom-stat-card');
+          card.appendChild(el('div', 'kikicom-stat-label', c[0]));
+          card.appendChild(el('div', 'kikicom-stat-value', c[1]));
+          card.appendChild(el('div', 'kikicom-stat-sub', c[2]));
+          parts.cards.appendChild(card);
+        });
+
+        renderPassTable(parts.passes, data.passes, selected, function (i) { selected = i; draw(); });
+
+        parts.series.textContent = '';
+        SERIES_SPECS.forEach(function (spec) {
+          var has = s[spec.key].some(function (v) { return v != null; });
+          if (has || ['oat', 'ws'].indexOf(spec.key) === -1) { renderSeries(parts.series, spec, s, range); }
+        });
+
+        if (!map) {
+          map = createAircraftMap(parts.map, data, range, { lon: 141.40, lat: 43.05 });
+        } else if (map.getSource('seg')) {
+          map.getSource('seg').setData(trackSegments(s, range));
+          fitAircraft(map, s, range, { lon: 141.40, lat: 43.05 });
+        }
+      }
+
+      function refresh() {
+        fetchJson('data/aircraft/' + key + '.json').then(function (d) {
+          if (!root) { return; }
+          if (!d) {
+            root.querySelector('.kikicom-subtitle').textContent = 'この機体は直近24時間の記録から外れました。';
+            return;
+          }
+          var wasLatest = selected === null || (data && selected === data.passes.length - 1);
+          data = d;
+          if (wasLatest) { selected = data.passes.length - 1; }
+          draw();
+        });
+      }
+
+      return {
+        show: function (element) {
+          root = el('div', 'kikicom-dashboard');
+          root.appendChild(el('h1', 'kikicom-title', domainObject.name));
+          root.appendChild(el('p', 'kikicom-subtitle', '読み込み中…'));
+          root.appendChild(el('div', 'kikicom-banner',
+            'ローカル試作:公的機・自衛隊機の区分と公開粒度の方針(人のレビュー)が決まるまで公開しない。'));
+          parts = { cards: el('div', 'kikicom-lad-row') };
+          root.appendChild(parts.cards);
+
+          var row = el('div', 'kikicom-two-col');
+          var mapPanel = el('div', 'kikicom-panel');
+          mapPanel.appendChild(el('h2', 'kikicom-panel-title', '航跡(選択中の通過)'));
+          parts.map = el('div', 'kikicom-map kikicom-map-small');
+          mapPanel.appendChild(parts.map);
+          renderLegend(mapPanel);
+          row.appendChild(mapPanel);
+          var passPanel = el('div', 'kikicom-panel');
+          passPanel.appendChild(el('h2', 'kikicom-panel-title', '通過の一覧(行をクリックで切り替え)'));
+          parts.passes = el('div', 'kikicom-table-wrap');
+          passPanel.appendChild(parts.passes);
+          passPanel.appendChild(el('p', 'kikicom-caption',
+            '判定は高度変化による大まかなもの(±1000ft超で上昇/降下)。10分以上途切れたら別の通過として扱う。'));
+          row.appendChild(passPanel);
+          root.appendChild(row);
+
+          var seriesPanel = el('div', 'kikicom-panel');
+          seriesPanel.appendChild(el('h2', 'kikicom-panel-title', 'タイムライン(選択中の通過)'));
+          parts.series = el('div', 'kikicom-series-grid');
+          seriesPanel.appendChild(parts.series);
+          root.appendChild(seriesPanel);
+
+          element.appendChild(root);
+          refresh();
+          timer = setInterval(refresh, LIVE_MS * 3);
+        },
+        destroy: function () {
+          clearInterval(timer);
+          if (map) { map.remove(); }
+          map = undefined; root = undefined; parts = undefined;
+        }
+      };
+    }
+  };
+
   var objectProvider = {
     get: function (identifier) {
-      if (identifier.key !== ROOT_KEY) {
-        return Promise.reject(new Error('unknown kikicom object: ' + identifier.key));
+      var key = identifier.key;
+      if (key === ROOT_KEY) {
+        return Promise.resolve({
+          identifier: identifier, name: 'kikicom 上空ダッシュボード', type: 'kikicom.root', location: 'ROOT',
+          composition: [{ namespace: NAMESPACE, key: 'timeline' }, { namespace: NAMESPACE, key: 'aircraft' }]
+        });
       }
-      return Promise.resolve({
-        identifier: identifier,
-        name: 'kikicom 上空ダッシュボード',
-        type: 'kikicom.root',
-        location: 'ROOT'
-      });
+      if (key === 'timeline') {
+        return Promise.resolve({ identifier: identifier, name: '機体タイムライン', type: 'kikicom.timeline',
+          location: NAMESPACE + ':' + ROOT_KEY });
+      }
+      if (key === 'aircraft') {
+        return fetchIndex().then(function (list) {
+          return {
+            identifier: identifier, name: '機体(直近24時間)', type: 'folder',
+            location: NAMESPACE + ':' + ROOT_KEY,
+            composition: list.slice().reverse().map(function (a) { return { namespace: NAMESPACE, key: 'ac-' + a.key }; })
+          };
+        });
+      }
+      if (key.indexOf('ac-') === 0) {
+        return fetchIndex().then(function (list) {
+          var a = list.filter(function (x) { return 'ac-' + x.key === key; })[0];
+          return {
+            identifier: identifier, type: 'kikicom.aircraft', location: NAMESPACE + ':aircraft',
+            name: a ? ((a.flights[0] || '(便名なし)') + ' ' + a.hex + (a.country ? ' ' + a.country : '')) : key.slice(3)
+          };
+        });
+      }
+      return Promise.reject(new Error('unknown kikicom object: ' + key));
     }
   };
 
@@ -430,6 +842,14 @@
       cssClass: 'icon-object',
       creatable: false
     });
+    openmct.types.addType('kikicom.timeline', {
+      name: '機体タイムライン', description: '直近24時間の機体ごとの観測区間', cssClass: 'icon-timeline', creatable: false
+    });
+    openmct.types.addType('kikicom.aircraft', {
+      name: '機体', description: 'ICAOアドレス単位の機体モニター', cssClass: 'icon-telemetry', creatable: false
+    });
     openmct.objectViews.addProvider(dashboardViewProvider);
+    openmct.objectViews.addProvider(timelineViewProvider);
+    openmct.objectViews.addProvider(aircraftViewProvider);
   };
 })();

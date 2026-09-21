@@ -9,6 +9,9 @@ Outputs (docs/data/, gitignored -- LOCAL PROTOTYPE ONLY):
   - tracks.geojson  one LineString per aircraft pass in the last N hours
   - points.geojson  every logged position in the last N hours (altitude dots)
   - stats.json      hourly counts, receiver status, current aircraft table
+  - aircraft/index.json   every aircraft seen in the last 24h, with its passes
+  - aircraft/<hex>.json   that aircraft's time series (columnar), for the
+                          per-aircraft view and the timeline
 
 NOT FOR PUBLICATION: no military / public-agency filtering is applied yet.
 Publishing needs the reviewed classification policy first (CLAUDE.md).
@@ -125,6 +128,82 @@ def build_tracks(rows):
     return feats, points
 
 
+def passes_of(rs):
+    """Split one aircraft's rows (time-sorted) into passes at GAP_SEC gaps."""
+    out, cur = [], []
+    for r in rs:
+        if cur and r["now"] - cur[-1]["now"] > GAP_SEC:
+            out.append(cur)
+            cur = []
+        cur.append(r)
+    if cur:
+        out.append(cur)
+    return out
+
+
+def phase(alts):
+    """Rough flight phase of a pass from its altitude change."""
+    alts = [a for a in alts if a is not None]
+    if len(alts) < 2:
+        return "—"
+    d = alts[-1] - alts[0]
+    return "上昇" if d > 1000 else "降下" if d < -1000 else "巡航"
+
+
+def build_aircraft(rows):
+    """Per-aircraft columnar series + an index with passes (last 24h)."""
+    by_hex = defaultdict(list)
+    for r in rows:
+        by_hex[r["hex"]].append(r)
+    index, files = [], {}
+    for hexcode, rs in by_hex.items():
+        flights = []
+        for r in rs:
+            f = (r.get("flight") or "").strip()
+            if f and f not in flights:
+                flights.append(f)
+        dst = lambda r: round(r["r_dst"] * 1.852, 1) if "r_dst" in r else None
+        passes = []
+        for ps in passes_of(rs):
+            alts = [alt_of(r) for r in ps]
+            known = [a for a in alts if a is not None]
+            ds = [d for d in (dst(r) for r in ps) if d is not None]
+            passes.append({"t0": int(ps[0]["now"]), "t1": int(ps[-1]["now"]), "n": len(ps),
+                           "alt0": next((a for a in alts if a is not None), None),
+                           "alt1": next((a for a in reversed(alts) if a is not None), None),
+                           "alt_min": min(known) if known else None,
+                           "alt_max": max(known) if known else None,
+                           "alt_mean": round(sum(known) / len(known)) if known else None,
+                           "dst_min": min(ds) if ds else None,
+                           "phase": phase(alts)})
+        key = "".join(c for c in hexcode if c.isalnum()).lower()
+        index.append({"hex": hexcode, "key": key, "flights": flights,
+                      "country": country(hexcode), "first": int(rs[0]["now"]),
+                      "last": int(rs[-1]["now"]), "n": len(rs), "passes": passes})
+        files[key] = {
+            "hex": hexcode, "flights": flights, "country": country(hexcode),
+            "category": next((r["category"] for r in reversed(rs) if r.get("category")), None),
+            "squawk": next((r["squawk"] for r in reversed(rs) if r.get("squawk")), None),
+            "passes": passes,
+            "series": {
+                "t": [round(r["now"], 1) for r in rs],
+                "lon": [round(r["lon"], 5) for r in rs],
+                "lat": [round(r["lat"], 5) for r in rs],
+                "alt": [alt_of(r) for r in rs],
+                "gs": [r.get("gs") for r in rs],
+                "rate": [r.get("baro_rate", r.get("geom_rate")) for r in rs],
+                "track": [r.get("track") for r in rs],
+                "dst": [dst(r) for r in rs],
+                "rssi": [r.get("rssi") for r in rs],
+                "oat": [r.get("oat") for r in rs],
+                "ws": [r.get("ws") for r in rs],
+                "wd": [r.get("wd") for r in rs],
+            },
+        }
+    index.sort(key=lambda a: a["first"])
+    return index, files
+
+
 def hourly(rows, hours):
     now = time.time()
     start = int(now // 3600 - hours + 1) * 3600
@@ -207,6 +286,16 @@ def main():
         write_json("tracks.geojson", {"type": "FeatureCollection", "features": tracks})
         write_json("points.geojson", {"type": "FeatureCollection", "features": points})
         stats["hourly"] = hourly(rows, 24)
+        index, files = build_aircraft(rows)
+        ac_dir = os.path.join(OUT_DIR, "aircraft")
+        os.makedirs(ac_dir, exist_ok=True)
+        for key, obj in files.items():
+            write_json(os.path.join("aircraft", key + ".json"), obj)
+        write_json(os.path.join("aircraft", "index.json"),
+                   {"generated_at": int(now), "hours": 24, "aircraft": index})
+        for name in os.listdir(ac_dir):  # drop aircraft that left the 24h window
+            if name.endswith(".json") and name != "index.json" and name[:-5] not in files:
+                os.remove(os.path.join(ac_dir, name))
         stats["window"] = {"hours": args.hours, "positions": len(win),
                            "aircraft": len({r["hex"] for r in win}),
                            "tracks": len(tracks)}

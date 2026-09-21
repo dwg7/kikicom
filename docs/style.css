@@ -46,3 +46,22 @@
 .kikicom-table th { color: #999; font-weight: normal; font-size: 11px; }
 .kikicom-caption { color: #888; font-size: 12px; }
 .kikicom-footer { color: #666; font-size: 11px; margin-top: 8px; }
+
+/* 機体タイムライン・機体ページ */
+.kikicom-timeline-wrap { overflow-x: auto; }
+.kikicom-timeline-svg { display: block; }
+.kikicom-timeline-label { fill: #ccc; font-size: 11px; font-family: ui-monospace, monospace; }
+.kikicom-timeline-hit { fill: transparent; }
+.kikicom-timeline-row { cursor: pointer; }
+.kikicom-timeline-row:hover .kikicom-timeline-hit { fill: rgba(255, 255, 255, 0.06); }
+.kikicom-timeline-bar { stroke: rgba(0, 0, 0, 0.4); stroke-width: 0.5; }
+.kikicom-timeline-now { stroke: #e63946; stroke-width: 1.5; stroke-dasharray: 3, 2; }
+.kikicom-map-small { height: 380px; }
+.kikicom-series-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+@media (max-width: 900px) { .kikicom-series-grid { grid-template-columns: minmax(0, 1fr); } }
+.kikicom-series-title { font-size: 12px; color: #aaa; margin-bottom: 2px; }
+.kikicom-series-line { fill: none; stroke: #5dade2; stroke-width: 1.5; }
+.kikicom-series-zero { stroke: #777; stroke-width: 1; stroke-dasharray: 2, 2; }
+.kikicom-pass-row { cursor: pointer; }
+.kikicom-pass-row:hover td { background: rgba(255, 255, 255, 0.05); }
+.kikicom-pass-selected td { background: rgba(52, 152, 219, 0.25); }
