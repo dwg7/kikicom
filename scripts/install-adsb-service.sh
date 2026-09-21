@@ -30,7 +30,7 @@ LOGGER_PATH="/usr/local/lib/kikicom/adsb-logger.py"
 RUN_USER="$(id -un)"
 
 READSB_BIN="${KIKICOM_READSB_BIN:-/usr/local/bin/readsb}"
-GAIN="${KIKICOM_GAIN:-40.2}"
+GAIN="${KIKICOM_GAIN:-49.6}"  # 1090MHz is ADC-noise-limited on the V4; keep it high (CLAUDE.md)
 DEVICE="${KIKICOM_DEVICE:-0}"
 # Receiver position, deliberately rounded to ~1km (Tsukisamu, Sapporo).
 LAT="${KIKICOM_LAT:-43.05}"
