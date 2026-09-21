@@ -169,7 +169,11 @@ def review(day):
             sections["航空会社の便名形式でないコールサイン"].append(a)
         # 例:2026-09-22 08:10 丘珠発のアジア航測 C208(JA13AJ)。登録はあり、所有者名に官公庁の語は
         # なく、便名も送らないので上の区分のどれにも入らなかった
-        if "1200" in a["squawks"] or (db and not a["flights"] and a["npos"] > 0):
+        # adsbdb の運航者コードは、航空会社の機体なら航空会社の符号(ANA 等)、一般航空なら
+        # 機種の符号(C208 等)が入っている。便名を受け取る前に見失った定期便を除くため
+        flag = (db or {}).get("registered_owner_operator_flag_code") or ""
+        ga_owner = bool(db) and (flag == db.get("icao_type") or not flag.isalpha())
+        if "1200" in a["squawks"] or (ga_owner and not a["flights"] and a["npos"] > 0):
             sections["有視界飛行(スコーク1200)・便名なしの一般航空(測量・報道・訓練・自家用など)"].append(a)
 
     def line(a):
