@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <title>kikicom 上空ダッシュボード</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="https://unpkg.com/openmct@4.3.1/dist/espressoTheme.css">
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.css">
+  <link rel="stylesheet" href="./style.css">
+  <style>
+    html, body { height: 100%; margin: 0; }
+  </style>
+</head>
+<body>
+  <script>
+    // CDN経由でOpen MCTを読み込むと、検索インデクサがSharedWorkerを自CDNオリジンから
+    // 起動しようとしてクロスオリジンエラーになる(kikimimiと同じ回避策)。
+    window.SharedWorker = undefined;
+  </script>
+  <script src="https://unpkg.com/openmct@4.3.1/dist/openmct.js"></script>
+  <script src="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.js"></script>
+  <script src="plugins/kikicom-provider.js"></script>
+  <script>
+    openmct.setAssetPath('https://unpkg.com/openmct@4.3.1/dist');
+    openmct.install(openmct.plugins.LocalStorage());
+    openmct.install(openmct.plugins.MyItems());
+    openmct.install(openmct.plugins.UTCTimeSystem());
+    openmct.install(openmct.plugins.Espresso());
+    openmct.install(openmct.plugins.Notebook());
+    openmct.install(KikicomProvider);
+
+    openmct.start();
+  </script>
+</body>
+</html>

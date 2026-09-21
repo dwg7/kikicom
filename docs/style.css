@@ -1,0 +1,48 @@
+/* kikimimi(docs/style.css)と同じトーンのダークテーマ。クラス接頭辞は kikicom- */
+.kikicom-dashboard {
+  padding: 16px 20px;
+  height: 100%;
+  box-sizing: border-box;
+  overflow-y: auto;
+  color: #e6e6e6;
+  font-family: sans-serif;
+}
+.kikicom-title { margin: 0 0 4px; font-size: 20px; }
+.kikicom-subtitle { margin: 0 0 12px; font-size: 12px; line-height: 1.6; color: #aaa; }
+.kikicom-banner {
+  background: #4a3b0a; color: #f1c40f; border: 1px solid #f1c40f;
+  border-radius: 4px; padding: 8px 12px; font-size: 12px; margin-bottom: 12px;
+}
+.kikicom-lad-row { display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+.kikicom-stat-card {
+  background: #2a2a2a; border-radius: 6px; padding: 10px 16px;
+  min-width: 160px; flex: 1 1 160px;
+}
+.kikicom-stat-label { font-size: 11px; color: #999; }
+.kikicom-stat-value { font-size: 22px; font-weight: bold; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.kikicom-stat-sub { font-size: 11px; color: #888; margin-top: 2px; }
+.kikicom-panel { background: #202020; border-radius: 6px; padding: 12px 16px; margin-bottom: 16px; min-width: 0; }
+.kikicom-panel-title { font-size: 14px; margin: 0 0 8px; color: #ccc; }
+.kikicom-two-col { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+@media (max-width: 900px) { .kikicom-two-col { grid-template-columns: minmax(0, 1fr); } }
+
+.kikicom-map { width: 100%; height: 520px; border-radius: 4px; overflow: hidden; }
+.kikicom-map .maplibregl-popup-content { background: #2a2a2a; color: #eee; font-size: 12px; line-height: 1.5; }
+.kikicom-map .maplibregl-popup-tip { border-top-color: #2a2a2a; border-bottom-color: #2a2a2a; }
+.kikicom-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 8px; font-size: 11px; color: #aaa; }
+.kikicom-legend-title { color: #ccc; }
+.kikicom-legend-item { display: inline-flex; align-items: center; gap: 4px; }
+.kikicom-legend-swatch { width: 12px; height: 12px; border-radius: 2px; display: inline-block; }
+
+.kikicom-plot-svg { width: 100%; height: auto; display: block; }
+.kikicom-plot-grid { stroke: #444; stroke-width: 1; }
+.kikicom-plot-axis { fill: #999; font-size: 13px; }
+.kikicom-plot-bar { fill: #3498db; }
+.kikicom-plot-bar:hover { fill: #5dade2; }
+
+.kikicom-table-wrap { overflow-x: auto; }
+.kikicom-table { border-collapse: collapse; width: 100%; font-size: 12px; font-variant-numeric: tabular-nums; }
+.kikicom-table th, .kikicom-table td { border-bottom: 1px solid #333; padding: 5px 8px; text-align: left; white-space: nowrap; }
+.kikicom-table th { color: #999; font-weight: normal; font-size: 11px; }
+.kikicom-caption { color: #888; font-size: 12px; }
+.kikicom-footer { color: #666; font-size: 11px; margin-top: 8px; }
