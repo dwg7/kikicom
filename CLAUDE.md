@@ -278,6 +278,8 @@ kikimimi の LaunchAgent(`com.dwg7.kikimimi.*`)もここで動いている。
 | RPi `~/adsb-log/*.jsonl.zst` | 確定した過去日の圧縮版(約1/10) | `adsb-compress.timer`(毎日09:30 JST = UTC日付が変わった後) |
 | slate `~/kikicom-data/adsb-log/` | RPiのミラー(RPiのSDだけにデータがある状態を避ける) | `com.dwg7.kikicom.sync-adsb-log`(LaunchAgent、15分おき、`scripts/install-sync-timer.sh`) |
 
+| slate `~/kikicom-data/review/YYYY-MM-DD.md` | 「要確認の機体」日次一覧(公用機候補・日本ブロックで登録不明かつ定期便名なし・ヘリA7・Mode Sのみ・非定期便コールサイン) | `com.dwg7.kikicom.review-aircraft`(LaunchAgent、毎時、`scripts/install-review-timer.sh`)。登録照会は adsbdb、キャッシュ `~/kikicom-data/adsbdb-cache.json`(7日) |
+
 - 同期ログ: `~/Library/Logs/kikicom/sync-adsb-log.log`
 - **2026-09-21 17:50 以降が、アンテナ位置を固定した「平常時の基準線」の
   始まり**(窓際・二重窓閉め・約20cm下げた位置、ゲイン49.6dB)。それ以前の
@@ -322,6 +324,11 @@ kikimimi の LaunchAgent(`com.dwg7.kikimimi.*`)もここで動いている。
 - [ ] GeoParquetアーカイブ(slate、非公開)とGeoJSON変換(公開候補)
 - [ ] 公的機・自衛隊機の区分と公開粒度の方針(ADRとして。人のレビュー必須)
 - [ ] 上記方針に基づくフィルタリングロジック(**公開経路を作る前に必須**)
+- [x] 「受信で知り得るライン」を知るための要確認一覧(`scripts/review-aircraft.py`)。
+  初日(2026-09-21)は公用機・自衛隊機ともに0。外国の国の機体として
+  KAF001(`71be43`、韓国空軍の要人機と見られる)を受信
+- [ ] 学習用であって公開用ではない、という位置づけを ADR にするか(ユーザーが検討中。
+  理由:受信は射界に偏った断片で公開価値が小さい、要配慮の機体が普通に混ざる)
 - [ ] MapLibreでの可視化ページ試作
 - [ ] GitHub Pagesでの公開方針の確定(kikimimiのADR 0016と同じパターンを
   想定、ただし本プロジェクト独自のADRとして記録すること)
