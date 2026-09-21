@@ -9,6 +9,8 @@ Outputs (docs/data/, gitignored -- LOCAL PROTOTYPE ONLY):
   - tracks.geojson  one LineString per aircraft pass in the last N hours
   - points.geojson  every logged position in the last N hours (altitude dots)
   - stats.json      hourly counts, receiver status, current aircraft table
+  - coverage.json   receive-rate samples vs adsb.lol (from coverage-check.py
+                    --record) and a bearing x elevation "field of view" grid
   - aircraft/index.json   every aircraft seen in the last 24h, with its passes
   - aircraft/<hex>.json   that aircraft's time series (columnar), for the
                           per-aircraft view and the timeline
@@ -204,6 +206,62 @@ def build_aircraft(rows):
     return index, files
 
 
+COVERAGE_DIR = os.path.join(HOME, "kikicom-data", "coverage")
+ELEV_BINS = [(-90, 2, "<2°"), (2, 4, "2–4°"), (4, 8, "4–8°"), (8, 91, "8°+")]
+BRG_STEP = 30
+
+
+def build_coverage(now, days=7):
+    """Receive-rate time series (last 48h) and a bearing x elevation grid (last N days)."""
+    series = []
+    path = os.path.join(COVERAGE_DIR, "summary.tsv")
+    if os.path.exists(path):
+        with open(path) as f:
+            next(f, None)
+            for line in f:
+                c = line.rstrip("\n").split("\t")
+                if len(c) < 7:
+                    continue
+                t = datetime.datetime.strptime(c[0], "%Y-%m-%dT%H:%M").replace(tzinfo=JST).timestamp()
+                if t < now - 48 * 3600:
+                    continue
+                na = c[3] == "NA"
+                series.append({"t": int(t), "radius": int(c[1]), "public": int(c[2]),
+                               "ours": None if na else int(c[3]),
+                               "rate": None if na else float(c[4]),
+                               "low_public": None if na else int(c[5]),
+                               "low_ours": None if na else int(c[6])})
+    grid = {}
+    for i in range(days):
+        day = datetime.datetime.fromtimestamp(now - i * 86400, JST).strftime("%Y-%m-%d")
+        p = os.path.join(COVERAGE_DIR, day + ".tsv")
+        if not os.path.exists(p):
+            continue
+        with open(p) as f:
+            next(f, None)
+            for line in f:
+                c = line.rstrip("\n").split("\t")
+                if len(c) < 9:
+                    continue
+                brg, elev, seen = float(c[6]), float(c[7]), c[8] == "1"
+                b = int(brg // BRG_STEP) % (360 // BRG_STEP)
+                e = next(k for k, (lo, hi, _) in enumerate(ELEV_BINS) if lo <= elev < hi)
+                cell = grid.setdefault((b, e), [0, 0])
+                cell[0] += 1
+                cell[1] += seen
+    cells = [{"brg0": b * BRG_STEP, "brg1": (b + 1) * BRG_STEP, "elev": e,
+              "total": v[0], "seen": v[1]} for (b, e), v in sorted(grid.items())]
+    valid = [x for x in series if x["rate"] is not None]
+    last = valid[-1] if valid else None
+    day_ago = [x for x in valid if x["t"] >= now - 24 * 3600]
+    return {"series": series, "elev_bins": [b[2] for b in ELEV_BINS], "brg_step": BRG_STEP,
+            "grid_days": days, "grid": cells, "last": last,
+            "rate_24h": (sum(x["ours"] for x in day_ago) / sum(x["public"] for x in day_ago))
+            if day_ago and sum(x["public"] for x in day_ago) else None,
+            "samples_24h": len(day_ago),
+            "missing_24h": sum(1 for x in series if x["rate"] is None and x["t"] >= now - 24 * 3600)}
+
+
 def hourly(rows, hours):
     now = time.time()
     start = int(now // 3600 - hours + 1) * 3600
@@ -278,6 +336,7 @@ def main():
 
     if args.live_only and prev:
         stats["hourly"] = prev.get("hourly", [])
+        stats["coverage"] = prev.get("coverage")
         stats["window"] = prev.get("window", {})
     else:
         rows = read_log_rows(min(now - args.hours * 3600, now - 24 * 3600))
@@ -286,6 +345,10 @@ def main():
         write_json("tracks.geojson", {"type": "FeatureCollection", "features": tracks})
         write_json("points.geojson", {"type": "FeatureCollection", "features": points})
         stats["hourly"] = hourly(rows, 24)
+        cov = build_coverage(now)
+        write_json("coverage.json", cov)
+        stats["coverage"] = {"last": cov["last"], "rate_24h": cov["rate_24h"],
+                             "samples_24h": cov["samples_24h"], "missing_24h": cov["missing_24h"]}
         index, files = build_aircraft(rows)
         ac_dir = os.path.join(OUT_DIR, "aircraft")
         os.makedirs(ac_dir, exist_ok=True)

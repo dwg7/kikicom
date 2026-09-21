@@ -230,7 +230,8 @@
       ['いま位置のわかる機体', fmt(live.with_position), '受信中 ' + fmt(live.aircraft_total) + '機'],
       ['この1時間の機体', fmt(lastHour.aircraft), '位置 ' + fmt(lastHour.positions) + '件'],
       ['直近' + fmt(win.hours) + '時間', fmt(win.aircraft) + '機', '航跡 ' + fmt(win.tracks) + ' / 位置 ' + fmt(win.positions)],
-      ['受信メッセージ/分', fmt(health.messages_1min), '信号 ' + fmt(health.signal, 1) + ' / 雑音 ' + fmt(health.noise, 1) + ' dBFS']
+      ['受信メッセージ/分', fmt(health.messages_1min), '信号 ' + fmt(health.signal, 1) + ' / 雑音 ' + fmt(health.noise, 1) + ' dBFS'],
+      coverageCard(stats && stats.coverage)
     ].forEach(function (c) {
       var card = el('div', 'kikicom-stat-card');
       card.appendChild(el('div', 'kikicom-stat-label', c[0]));
@@ -305,6 +306,142 @@
     container.appendChild(table);
   }
 
+  // ---------------------------------------------------------------------------
+  // 受信環境(adsb.lol 比の受信率、scripts/coverage-check.py --record の定点観測)
+  // ---------------------------------------------------------------------------
+  function pct(v) { return v == null ? '—' : Math.round(v * 100) + '%'; }
+
+  function coverageCard(cov) {
+    var last = cov && cov.last;
+    return ['受信率(adsb.lol比)', last ? pct(last.rate) : '—',
+      last ? ('直近 ' + last.ours + '/' + last.public + '機・24時間 ' + pct(cov.rate_24h) +
+        (cov.missing_24h ? '・欠測 ' + cov.missing_24h : '')) : '定点観測の記録なし'];
+  }
+
+  // 受信率 0→1 の色(赤→黄→緑)
+  function rateColor(r) {
+    if (r == null) { return '#2a2a2a'; }
+    return r < 0.5 ? mixHex('#7a2e2e', '#d4ac0d', r / 0.5) : mixHex('#d4ac0d', '#27ae60', (r - 0.5) / 0.5);
+  }
+
+  // 受信率の推移(全機体と仰角4°未満)。欠測は下端に灰色の印
+  function renderCoverageSeries(container, cov) {
+    container.textContent = '';
+    var series = (cov && cov.series) || [];
+    if (!series.length) {
+      container.appendChild(el('p', 'kikicom-caption', 'まだ定点観測の記録がありません(15分ごとに追加)。'));
+      return;
+    }
+    var width = 360, height = 220, m = { top: 12, right: 10, bottom: 30, left: 40 };
+    var pw = width - m.left - m.right, ph = height - m.top - m.bottom;
+    var GAP = 45 * 60; // 観測の空白がこれ以上なら線を切る
+    var t0 = series[0].t, t1 = Math.max(series[series.length - 1].t, t0 + 3600);
+    var x = function (t) { return m.left + ((t - t0) / (t1 - t0)) * pw; };
+    var y = function (r) { return m.top + ph - r * ph; };
+    var svg = svgEl('svg', { viewBox: '0 0 ' + width + ' ' + height, class: 'kikicom-plot-svg', role: 'img',
+      'aria-label': '受信率の推移' });
+    [0, 0.25, 0.5, 0.75, 1].forEach(function (r) {
+      svg.appendChild(svgEl('line', { x1: m.left, x2: width - m.right, y1: y(r), y2: y(r), class: 'kikicom-plot-grid' }));
+      var t = svgEl('text', { x: m.left - 5, y: y(r) + 4, class: 'kikicom-plot-axis', 'text-anchor': 'end' });
+      t.textContent = Math.round(r * 100) + '%';
+      svg.appendChild(t);
+    });
+    [t0, (t0 + t1) / 2, t1].forEach(function (t, k) {
+      var lbl = svgEl('text', { x: x(t), y: height - 8, class: 'kikicom-plot-axis',
+        'text-anchor': k === 0 ? 'start' : k === 2 ? 'end' : 'middle' });
+      var d = new Date(t * 1000);
+      lbl.textContent = (d.getMonth() + 1) + '/' + d.getDate() + ' ' + hhmm(t);
+      svg.appendChild(lbl);
+    });
+    function line(key, cls) {
+      var d = '', pen = false, prevT = null;
+      series.forEach(function (p) {
+        var v = key === 'rate' ? p.rate : (p.low_public ? p.low_ours / p.low_public : null);
+        if (v == null) { pen = false; return; }
+        if (prevT !== null && p.t - prevT > GAP) { pen = false; }
+        prevT = p.t;
+        d += (pen ? 'L' : 'M') + x(p.t).toFixed(1) + ',' + y(v).toFixed(1);
+        pen = true;
+        var c = svgEl('circle', { cx: x(p.t), cy: y(v), r: 2.5, class: cls + '-pt' });
+        c.appendChild(svgEl('title')).textContent = hhmm(p.t) + ' ' +
+          (key === 'rate' ? '全体 ' + p.ours + '/' + p.public : '仰角4°未満 ' + p.low_ours + '/' + p.low_public) +
+          '(半径' + p.radius + 'nm)';
+        svg.appendChild(c);
+      });
+      svg.insertBefore(svgEl('path', { d: d, class: cls }), svg.firstChild.nextSibling);
+    }
+    line('low', 'kikicom-cov-low');
+    line('rate', 'kikicom-cov-all');
+    series.forEach(function (p) {
+      if (p.rate == null) {
+        var r = svgEl('rect', { x: x(p.t) - 2, y: m.top + ph - 6, width: 4, height: 6, class: 'kikicom-cov-missing' });
+        r.appendChild(svgEl('title')).textContent = hhmm(p.t) + ' 欠測(RPiに接続できず)';
+        svg.appendChild(r);
+      }
+    });
+    container.appendChild(svg);
+    var key = el('div', 'kikicom-legend');
+    [['kikicom-cov-all-key', '全体'], ['kikicom-cov-low-key', '仰角4°未満'], ['kikicom-cov-missing-key', '欠測']].forEach(function (k) {
+      var item = el('span', 'kikicom-legend-item');
+      item.appendChild(el('span', 'kikicom-legend-swatch ' + k[0]));
+      item.appendChild(document.createTextNode(k[1]));
+      key.appendChild(item);
+    });
+    container.appendChild(key);
+  }
+
+  // 窓の視界:方位 × 仰角の扇形。中心が真上、外側ほど低い仰角(遠い)
+  function renderCoveragePolar(container, cov) {
+    container.textContent = '';
+    var grid = (cov && cov.grid) || [];
+    if (!grid.length) {
+      container.appendChild(el('p', 'kikicom-caption', 'まだ定点観測の記録がありません。'));
+      return;
+    }
+    var bins = cov.elev_bins, nE = bins.length;
+    var size = 320, cx = size / 2, cy = size / 2, rMax = size / 2 - 26, rMin = 14;
+    var ringR = function (e) { return rMin + ((nE - e) / nE) * (rMax - rMin); }; // e=0(<2°)が最外周
+    var pt = function (r, deg) {
+      var a = (deg - 90) * Math.PI / 180;
+      return [cx + r * Math.cos(a), cy + r * Math.sin(a)];
+    };
+    var svg = svgEl('svg', { viewBox: '0 0 ' + size + ' ' + size, class: 'kikicom-polar-svg', role: 'img',
+      'aria-label': '方位と仰角ごとの受信率' });
+    grid.forEach(function (c) {
+      var ro = ringR(c.elev), ri = ringR(c.elev + 1);
+      var a0 = c.brg0, a1 = c.brg1;
+      var p1 = pt(ro, a0), p2 = pt(ro, a1), p3 = pt(ri, a1), p4 = pt(ri, a0);
+      var d = 'M' + p1 + ' A' + ro + ',' + ro + ' 0 0 1 ' + p2 + ' L' + p3 +
+        ' A' + ri + ',' + ri + ' 0 0 0 ' + p4 + ' Z';
+      var rate = c.total ? c.seen / c.total : null;
+      var path = svgEl('path', { d: d, fill: rateColor(rate), class: 'kikicom-polar-cell',
+        'fill-opacity': Math.min(1, 0.35 + c.total / 20) });
+      path.appendChild(svgEl('title')).textContent = '方位 ' + a0 + '–' + a1 + '° / 仰角 ' + bins[c.elev] +
+        ': ' + c.seen + '/' + c.total + '機(' + pct(rate) + ')';
+      svg.appendChild(path);
+    });
+    for (var e = 0; e <= nE; e += 1) {
+      svg.appendChild(svgEl('circle', { cx: cx, cy: cy, r: ringR(e), class: 'kikicom-polar-ring' }));
+    }
+    for (var b = 0; b < 360; b += 30) {
+      var q1 = pt(rMin, b), q2 = pt(rMax, b);
+      svg.appendChild(svgEl('line', { x1: q1[0], y1: q1[1], x2: q2[0], y2: q2[1], class: 'kikicom-polar-ring' }));
+    }
+    [['N', 0], ['E', 90], ['S', 180], ['W', 270]].forEach(function (d) {
+      var q = pt(rMax + 14, d[1]);
+      var t = svgEl('text', { x: q[0], y: q[1] + 5, class: 'kikicom-polar-label', 'text-anchor': 'middle' });
+      t.textContent = d[0];
+      svg.appendChild(t);
+    });
+    bins.forEach(function (label, i) {
+      var q = pt((ringR(i) + ringR(i + 1)) / 2, 0);
+      var t = svgEl('text', { x: q[0] + 3, y: q[1] + 4, class: 'kikicom-polar-ringlabel' });
+      t.textContent = label;
+      svg.appendChild(t);
+    });
+    container.appendChild(svg);
+  }
+
   function buildDashboard(container) {
     var root = el('div', 'kikicom-dashboard');
     root.appendChild(el('h1', 'kikicom-title', 'kikicom 上空ダッシュボード'));
@@ -323,6 +460,20 @@
     mapPanel.appendChild(mapEl);
     renderLegend(mapPanel);
     root.appendChild(mapPanel);
+
+    var covPanel = el('div', 'kikicom-panel');
+    covPanel.appendChild(el('h2', 'kikicom-panel-title', '受信環境(adsb.lol に見えている機体のうち、何割を受信できたか)'));
+    var covRow = el('div', 'kikicom-two-col');
+    var covSeries = el('div');
+    var covPolar = el('div', 'kikicom-polar-wrap');
+    covRow.appendChild(covSeries);
+    covRow.appendChild(covPolar);
+    covPanel.appendChild(covRow);
+    covPanel.appendChild(el('p', 'kikicom-caption',
+      '15分ごとの定点観測(半径100nm)。取り逃がした機体も分母に入るので、受信強度の平均と違い生存者バイアスがない。' +
+      '右は「窓の視界」:中心が真上、外側ほど低い仰角(遠い機体)。色は受信率(赤0%→黄50%→緑100%)、淡いほど標本が少ない。' +
+      '急な低下は、運航の乱れより先に結露・凍結・アンテナの移動を疑う。'));
+    root.appendChild(covPanel);
 
     var row = el('div', 'kikicom-two-col');
     var plotPanel = el('div', 'kikicom-panel');
@@ -351,7 +502,8 @@
     root.appendChild(footer);
     container.appendChild(root);
 
-    return { cards: cards, mapEl: mapEl, plotBody: plotBody, tableBody: tableBody, footer: footer };
+    return { cards: cards, mapEl: mapEl, plotBody: plotBody, tableBody: tableBody, footer: footer,
+      covSeries: covSeries, covPolar: covPolar };
   }
 
   // ---------------------------------------------------------------------------
@@ -851,7 +1003,16 @@
         });
       }
 
+      function refreshCoverage() {
+        fetchJson('data/coverage.json').then(function (cov) {
+          if (!parts) { return; }
+          renderCoverageSeries(parts.covSeries, cov);
+          renderCoveragePolar(parts.covPolar, cov);
+        });
+      }
+
       function refreshTracks() {
+        refreshCoverage();
         if (!ready) { return; }
         fetchJson('data/tracks.geojson').then(function (d) { setSource(map, 'tracks', d); });
         fetchJson('data/points.geojson').then(function (d) { setSource(map, 'points', d); });
@@ -874,6 +1035,7 @@
             }
           });
           refreshLive();
+          refreshCoverage();
           timers.push(setInterval(refreshLive, LIVE_MS));
           timers.push(setInterval(refreshTracks, TRACK_MS));
         },

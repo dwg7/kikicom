@@ -65,3 +65,19 @@
 .kikicom-pass-row { cursor: pointer; }
 .kikicom-pass-row:hover td { background: rgba(255, 255, 255, 0.05); }
 .kikicom-pass-selected td { background: rgba(52, 152, 219, 0.25); }
+
+/* 受信環境パネル */
+.kikicom-cov-all { fill: none; stroke: #5dade2; stroke-width: 2; }
+.kikicom-cov-all-pt { fill: #5dade2; }
+.kikicom-cov-low { fill: none; stroke: #e67e22; stroke-width: 1.5; stroke-dasharray: 4, 3; }
+.kikicom-cov-low-pt { fill: #e67e22; }
+.kikicom-cov-missing { fill: #888; }
+.kikicom-cov-all-key { background: #5dade2; }
+.kikicom-cov-low-key { background: #e67e22; }
+.kikicom-cov-missing-key { background: #888; }
+.kikicom-polar-wrap { display: flex; justify-content: center; }
+.kikicom-polar-svg { width: 100%; max-width: 340px; height: auto; display: block; }
+.kikicom-polar-cell { stroke: #202020; stroke-width: 1; }
+.kikicom-polar-ring { fill: none; stroke: #555; stroke-width: 0.7; }
+.kikicom-polar-label { fill: #ccc; font-size: 13px; font-weight: bold; }
+.kikicom-polar-ringlabel { fill: #aaa; font-size: 10px; }
