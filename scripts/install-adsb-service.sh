@@ -104,7 +104,7 @@ Conflicts=kikimimi-record.service
 Type=simple
 User=${RUN_USER}
 RuntimeDirectory=adsb-research
-ExecStart=${READSB_BIN} --device-type rtlsdr --device ${DEVICE} --gain ${GAIN} --lat ${LAT} --lon ${LON} --write-json /run/adsb-research --write-json-every 5 --net --net-bind-address 127.0.0.1 --net-json-port ${JSON_PORT} --net-json-port-include-noposition --net-ro-size 8192 --quiet
+ExecStart=${READSB_BIN} --device-type rtlsdr --device ${DEVICE} --gain ${GAIN} --lat ${LAT} --lon ${LON} --write-json /run/adsb-research --write-json-every 5 --net --net-bind-address 127.0.0.1 --net-json-port ${JSON_PORT} --net-json-port-include-noposition --net-bo-port 30005 --net-ro-size 8192 --quiet
 Restart=on-failure
 RestartSec=5
 
