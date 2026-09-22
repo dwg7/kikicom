@@ -10,8 +10,8 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 PORT="${KIKICOM_VIZ_PORT:-8329}"
 BIND="${KIKICOM_VIZ_BIND:-127.0.0.1}"
 
-./scripts/sync-adsb-log.sh >/dev/null
-python3 scripts/build-viz-data.py
+./scripts/sync-adsb-log.sh >/dev/null || true
+python3 scripts/build-viz-data.py || echo "initial build failed" >&2
 python3 -m http.server "$PORT" --bind "$BIND" --directory docs >/dev/null 2>&1 &
 SERVER_PID=$!
 trap 'kill $SERVER_PID 2>/dev/null' EXIT

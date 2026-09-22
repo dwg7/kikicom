@@ -7,7 +7,11 @@
 set -uo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HOST="${KIKICOM_RPI_HOST:-m329.local}"
-TMP="$(mktemp "${TMPDIR:-/tmp}/kikicom-aircraft.XXXXXX")"
+# Check mktemp's own exit status explicitly (not just `set -u` on the empty result):
+# a silently-empty TMP would make --ours-file "" fall through to coverage-check.py's
+# direct-ssh-from-Python fallback below, which is exactly the launchd/"No route to
+# host" failure this whole script exists to avoid.
+TMP="$(mktemp "${TMPDIR:-/tmp}/kikicom-aircraft.XXXXXX")" || { echo "mktemp failed" >&2; exit 1; }
 trap 'rm -f "$TMP"' EXIT
 for attempt in 1 2; do
   if ssh -o BatchMode=yes -o ConnectTimeout=15 "$HOST" cat /run/adsb-research/aircraft.json > "$TMP"; then
@@ -17,5 +21,8 @@ for attempt in 1 2; do
   : > "$TMP"
   sleep 5
 done
-# an empty file makes coverage-check.py record the sample as missing (NA)
-exec python3 "$DIR/coverage-check.py" --record --ours-file "$TMP"
+# an empty file makes coverage-check.py record the sample as missing (NA).
+# Not `exec`: this is a plain call (not a process replacement) so the EXIT trap
+# above still fires afterward and removes $TMP.
+python3 "$DIR/coverage-check.py" --record --ours-file "$TMP"
+exit $?

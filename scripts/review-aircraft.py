@@ -248,7 +248,8 @@ def review(day):
             head += f"  {db.get('type', '')} {db.get('registered_owner', '')}"
         lines = [head, ""]
         for e in sorted(a["emergency_events"], key=lambda e: e["t"]):
-            pos = f"{e['lat']:.4f},{e['lon']:.4f}" if e["lat"] is not None else "位置不明"
+            pos = (f"{e['lat']:.4f},{e['lon']:.4f}"
+                   if e["lat"] is not None and e["lon"] is not None else "位置不明")
             lines.append(f"- {t(e['t'])}  スコーク **{e['squawk']}**({EMERGENCY_SQUAWKS[e['squawk']]})"
                          f"  高度{e['alt'] if e['alt'] is not None else '不明'}  {pos}")
         return "\n".join(lines)

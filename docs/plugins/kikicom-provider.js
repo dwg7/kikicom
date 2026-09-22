@@ -764,6 +764,8 @@
     var feats = [];
     for (var i = 1; i < s.t.length; i += 1) {
       if (s.t[i] < range[0] || s.t[i - 1] > range[1] || s.t[i] - s.t[i - 1] > GAP_SEC) { continue; }
+      // Mode-S-only (no-position) rows now appear in the series with lon/lat == null
+      if (s.lon[i] == null || s.lat[i] == null || s.lon[i - 1] == null || s.lat[i - 1] == null) { continue; }
       feats.push({ type: 'Feature',
         geometry: { type: 'LineString', coordinates: [[s.lon[i - 1], s.lat[i - 1]], [s.lon[i], s.lat[i]]] },
         properties: { alt: s.alt[i] } });
@@ -1073,6 +1075,7 @@
         show: function (element) {
           parts = buildDashboard(element);
           fetchJson('data/stats.json').then(function (stats) {
+            if (!parts) { return; }  // destroy() ran before this fetch resolved
             var receiver = (stats && stats.receiver) || { lon: 141.40, lat: 43.05 };
             map = createMap(parts.mapEl, receiver);
             map.on('kikicom:ready', function () {

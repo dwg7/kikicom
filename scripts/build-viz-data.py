@@ -63,6 +63,8 @@ class Registry:
     """adsbdb registration lookups, sharing review-aircraft.py's cache.
     Only aircraft currently in the air are fetched (a few per run); others use the cache."""
 
+    CACHE_TTL = 7 * 86400  # same policy as review-aircraft.py's lookup(), kept in sync manually
+
     def __init__(self, max_fetch=3):
         try:
             with open(ADSBDB_CACHE) as f:
@@ -75,14 +77,17 @@ class Registry:
         except (OSError, ValueError):
             self.watch = {"label": "注目", "icao_types": [], "owner_keywords": [], "registrations": []}
         self.left = max_fetch
+        self.new = {}  # only entries THIS process fetched; save() writes only these back,
+                        # so a stale/unchanged in-memory snapshot never clobbers a concurrent
+                        # writer's fresher update to a key this process didn't touch.
         self.dirty = False
 
     def get(self, hexcode, fetch=False):
         c = self.cache.get(hexcode)
-        if c is not None:
+        if c is not None and time.time() - c.get("at", 0) < self.CACHE_TTL:
             return c.get("aircraft")
         if not fetch or self.left <= 0 or hexcode.startswith("~"):
-            return None
+            return c.get("aircraft") if c is not None else None  # stale-but-present beats nothing
         self.left -= 1
         aircraft = None
         try:
@@ -92,10 +97,12 @@ class Registry:
             aircraft = resp.get("aircraft") if isinstance(resp, dict) else None
         except urllib.error.HTTPError as e:
             if e.code != 404:
-                return None
+                return c.get("aircraft") if c is not None else None
         except Exception:
-            return None
-        self.cache[hexcode] = {"at": time.time(), "aircraft": aircraft}
+            return c.get("aircraft") if c is not None else None
+        entry = {"at": time.time(), "aircraft": aircraft}
+        self.cache[hexcode] = entry
+        self.new[hexcode] = entry
         self.dirty = True
         return aircraft
 
@@ -117,7 +124,9 @@ class Registry:
                 disk = json.load(f)
         except (OSError, ValueError):
             disk = {}
-        disk.update(self.cache)
+        disk.update(self.new)  # only overlay entries fetched THIS run -- never the whole
+                                # in-memory snapshot, so an untouched key a concurrent writer
+                                # (review-aircraft.py) updated meanwhile is left alone
         tmp = ADSBDB_CACHE + ".tmp"
         with open(tmp, "w") as f:
             json.dump(disk, f, ensure_ascii=False)
@@ -159,7 +168,7 @@ def read_log_rows(since):
                 r = json.loads(line)
             except json.JSONDecodeError:
                 continue  # a line cut mid-write by rsync
-            if r.get("now", 0) >= since and "lat" in r:
+            if r.get("now", 0) >= since:
                 rows.append(r)
     rows.sort(key=lambda r: (r["hex"], r["now"]))
     return rows
@@ -181,9 +190,14 @@ def alt_of(r):
 
 
 def build_tracks(rows):
+    # read_log_rows() no longer drops Mode-S-only (no-position) rows -- they still
+    # count toward hourly()/build_aircraft()'s aircraft presence, but a line/point
+    # needs coordinates, so skip them here specifically.
     tracks, points = [], []
     current, last = None, None
     for r in rows:
+        if "lat" not in r:
+            continue
         if last is None or r["hex"] != last["hex"] or r["now"] - last["now"] > GAP_SEC:
             if current and len(current["coords"]) >= 2:
                 tracks.append(current)
@@ -273,8 +287,8 @@ def build_aircraft(rows, reg=None):
             "passes": passes,
             "series": {
                 "t": [round(r["now"], 1) for r in rs],
-                "lon": [round(r["lon"], 5) for r in rs],
-                "lat": [round(r["lat"], 5) for r in rs],
+                "lon": [round(r["lon"], 5) if "lon" in r else None for r in rs],
+                "lat": [round(r["lat"], 5) if "lat" in r else None for r in rs],
                 "alt": [alt_of(r) for r in rs],
                 "gs": [r.get("gs") for r in rs],
                 "rate": [r.get("baro_rate", r.get("geom_rate")) for r in rs],
@@ -362,7 +376,9 @@ def build_coverage(now, days=7):
                     continue
                 brg, elev, seen = float(c[6]), float(c[7]), c[8] == "1"
                 b = int(brg // BRG_STEP) % (360 // BRG_STEP)
-                e = next(k for k, (lo, hi, _) in enumerate(ELEV_BINS) if lo <= elev < hi)
+                e = next((k for k, (lo, hi, _) in enumerate(ELEV_BINS) if lo <= elev < hi), None)
+                if e is None:
+                    continue  # elev outside [-90, 91): a corrupted/partial line, not a real reading
                 cell = grid.setdefault((b, e), [0, 0])
                 cell[0] += 1
                 cell[1] += seen

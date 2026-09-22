@@ -95,15 +95,20 @@ def main():
             ours = None
     else:
         ours = fetch_ours(args.host)
+    def usable(a):  # excludes entries geometry() can't use: no position, non-numeric altitude
+        return "lat" in a and isinstance(a.get("alt_baro"), (int, float))
+
     if ours is None:
-        # 一時的な ssh/mDNS 失敗。欠測を黙って落とさず、欠測として残す
+        # 一時的な ssh/mDNS 失敗。欠測を黙って落とさず、欠測として残す。
+        # summary.tsv の public 列は record() 側と同じ「使える機体数」で揃える
+        # (adsb.lol の生の件数を使うと NA 行だけ分母が違ってしまう)
         if args.record:
-            record_missing(args.radius, len(public))
+            record_missing(args.radius, sum(1 for a in public if usable(a)))
         raise SystemExit(f"could not read aircraft.json from {args.host}")
 
     rows = []
     for a in public:
-        if "lat" not in a or not isinstance(a.get("alt_baro"), (int, float)):
+        if not usable(a):
             continue
         d, b, e = geometry(a["lat"], a["lon"], a["alt_baro"])
         rows.append((e, d, b, a, a["hex"] in ours))
