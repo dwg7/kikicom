@@ -25,6 +25,8 @@ CACHE_TTL = 7 * 86400
 JST = datetime.timezone(datetime.timedelta(hours=9))
 JP_BLOCK = (0x840000, 0x87FFFF)
 AIRLINE_CALLSIGN = re.compile(r"^[A-Z]{3}\d{1,4}[A-Z]{0,2}$")
+# ICAO標準の緊急スコーク(世界共通)。7500=ハイジャック等不法妨害、7600=無線通信故障、7700=緊急事態全般
+EMERGENCY_SQUAWKS = {"7500": "ハイジャック(不法妨害)", "7600": "無線通信故障", "7700": "緊急事態"}
 # 所有者・運航者名にこれらが含まれたら「公用機の候補」
 PUBLIC_WORDS = [
     "国土交通", "航空局", "海上保安", "警察", "消防", "防災", "防衛", "自衛隊",
@@ -130,7 +132,7 @@ def review(day):
         h = r["hex"]
         a = ac.setdefault(h, {"hex": h, "flights": set(), "cats": set(), "squawks": set(),
                               "n": 0, "npos": 0, "alts": [], "first": r["now"], "last": r["now"],
-                              "types": set(), "dmin": None})
+                              "types": set(), "dmin": None, "emergency_events": []})
         a["n"] += 1
         a["last"] = max(a["last"], r["now"])
         a["first"] = min(a["first"], r["now"])
@@ -140,6 +142,11 @@ def review(day):
         for k, dst in (("category", "cats"), ("squawk", "squawks"), ("type", "types")):
             if r.get(k):
                 a[dst].add(r[k])
+        sq = r.get("squawk")
+        if sq in EMERGENCY_SQUAWKS:
+            a["emergency_events"].append({"t": r["now"], "squawk": sq,
+                                          "lat": r.get("lat"), "lon": r.get("lon"),
+                                          "alt": r.get("alt_baro")})
         if isinstance(r.get("alt_baro"), (int, float)):
             a["alts"].append(r["alt_baro"])
         if "lat" in r:
@@ -168,7 +175,9 @@ def review(day):
 
     watch = load_watchlist()
     watch_title = f"★ {watch['label']}(scripts/watchlist.json:機種・所有者名・登録記号)"
+    emergency_title = "🚨 緊急スコーク(7500/7600/7700)"
     sections = {
+        emergency_title: [],
         watch_title: [],
         "公用機の候補(所有者名に官公庁らしい語)": [],
         "日本のブロックで登録不明・要確認(自衛隊・官公庁・新規登録の候補)": [],
@@ -180,6 +189,8 @@ def review(day):
     }
     for a in ac.values():
         db = a["db"]
+        if a["emergency_events"]:
+            sections[emergency_title].append(a)
         if watched(db, watch):
             sections[watch_title].append(a)
         if db and any(w in owner(a) for w in PUBLIC_WORDS):
@@ -229,14 +240,29 @@ def review(day):
            "学習用の記録。公開しない(CLAUDE.md)。登録情報は adsbdb の公開データによる。", ""]
     head = ("| ICAO | コールサイン | 登録 | 機種 | 所有者 | 時刻 | 高度 | 位置あり/全行 | 最接近 | スコーク |\n"
             "|---|---|---|---|---|---|---|---|---|---|")
+    def emergency_line(a):
+        t = lambda x: datetime.datetime.fromtimestamp(x, JST).strftime("%H:%M:%S")
+        db = a["db"] or {}
+        head = f"### {a['hex']} {'/'.join(sorted(a['flights'])) or db.get('registration') or '(便名不明)'}"
+        if db.get("type") or db.get("registered_owner"):
+            head += f"  {db.get('type', '')} {db.get('registered_owner', '')}"
+        lines = [head, ""]
+        for e in sorted(a["emergency_events"], key=lambda e: e["t"]):
+            pos = f"{e['lat']:.4f},{e['lon']:.4f}" if e["lat"] is not None else "位置不明"
+            lines.append(f"- {t(e['t'])}  スコーク **{e['squawk']}**({EMERGENCY_SQUAWKS[e['squawk']]})"
+                         f"  高度{e['alt'] if e['alt'] is not None else '不明'}  {pos}")
+        return "\n".join(lines)
+
     for title, items in sections.items():
         out.append(f"## {title}({len(items)})")
         out.append("")
-        if items:
+        if not items:
+            out.append("なし")
+        elif title == emergency_title:
+            out.extend(emergency_line(a) for a in sorted(items, key=lambda a: a["first"]))
+        else:
             out.append(head)
             out.extend(line(a) for a in sorted(items, key=lambda a: a["first"]))
-        else:
-            out.append("なし")
         out.append("")
     os.makedirs(OUT_DIR, exist_ok=True)
     path = os.path.join(OUT_DIR, f"{day}.md")
