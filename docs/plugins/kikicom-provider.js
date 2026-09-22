@@ -176,7 +176,7 @@
         }
       });
 
-      // 注目機(scripts/watchlist.json、航空測量の同業など):★と橙色。★は日本語フォントにしかない
+      // 注目機(scripts/watchlist.json、航空測量の機体など):★と橙色。★は日本語フォントにしかない
       map.addLayer({
         id: 'live-watch', type: 'symbol', source: 'live',
         filter: ['to-boolean', ['get', 'watch']],

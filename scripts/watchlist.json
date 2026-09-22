@@ -1,6 +1,6 @@
 {
-  "_note": "注目する機体(航空測量の同業など)。要確認一覧(review-aircraft.py)の先頭区分と、ダッシュボードの強調表示に使う。機種は測量以外の用途もあるので誤検出はありうる。adsbdb の英語の所有者名に部分一致(大文字小文字は無視)。",
-  "label": "航空測量(同業)",
+  "_note": "注目する機体(航空測量の機体など)。要確認一覧(review-aircraft.py)の先頭区分と、ダッシュボードの強調表示に使う。機種は測量以外の用途もあるので誤検出はありうる。adsbdb の英語の所有者名に部分一致(大文字小文字は無視)。",
+  "label": "航空測量",
   "icao_types": ["C208", "BE20", "B350", "C404", "P68"],
   "owner_keywords": ["Aero Geosurveys", "Asia Air Survey", "Kokusai Kogyo", "PASCO", "Nakanihon",
                      "Aero Asahi", "Geospatial Information", "Survey", "Mapping"],
