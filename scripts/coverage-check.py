@@ -22,7 +22,20 @@ ODbL: kept for internal use only, never published or committed.
 """
 import argparse, datetime, json, math, os, subprocess, sys, time, urllib.request
 
-LAT, LON = 43.05, 141.40  # receiver, rounded to ~1km (same as the service)
+def _receiver_location():
+    """Precise receiver location if available (~/kikicom-data/receiver-location.json,
+    outside the repo, never committed); falls back to the ~1km-rounded public default
+    (same value used in the repo's own service defaults / CLAUDE.md)."""
+    p = os.path.join(os.path.expanduser("~"), "kikicom-data", "receiver-location.json")
+    try:
+        with open(p) as f:
+            d = json.load(f)
+        return d["lat"], d["lon"]
+    except (OSError, ValueError, KeyError):
+        return 43.05, 141.40  # rounded to ~1km
+
+
+LAT, LON = _receiver_location()
 EARTH_R_M = 6371000.0
 
 

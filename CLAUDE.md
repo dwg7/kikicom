@@ -171,7 +171,14 @@ ssh m329.local 'bash -s uninstall' < scripts/install-adsb-service.sh
 - ライブJSON: `/run/adsb-research/`(aircraft.json, stats.json等。
   `RuntimeDirectory=`によるtmpfs。数秒おきの書き換えでSDカードを
   傷めないため)。旧出力先`~/adsb-data/`は使っていない
-- 受信位置は`--lat 43.05 --lon 141.40`(意図的に約1km精度に丸めてある)
+- 受信位置は`--lat`/`--lon`。**リポジトリのデフォルトは`43.05`/`141.40`(意図的に約1km精度に
+  丸めてある)のまま維持**する。RPi上で実際に動いている readsb は、2026-09-22 12:xx から
+  `KIKICOM_LAT=43.039192 KIKICOM_LON=141.396433 ssh m329.local bash -s < scripts/install-adsb-service.sh`
+  で**正確な位置**に切り替え済み(env var override、リポジトリの既定値は変更していない)。
+  近距離(丘珠周辺など数km圏)の`r_dst`/`r_dir`計算の精度向上が目的。正確な値は
+  `~/kikicom-data/receiver-location.json`(リポジトリ外、git管理下にない)にのみ存在する。
+  `scripts/coverage-check.py`・`scripts/build-viz-data.py`もこのファイルがあれば読み、
+  無ければ丸めた既定値にフォールバックする
 
 ### 受信の切り分け手順(2026-09-21の知見)
 

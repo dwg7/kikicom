@@ -24,7 +24,21 @@ from collections import defaultdict
 HOME = os.path.expanduser("~")
 LOG_DIR = os.path.join(HOME, "kikicom-data", "adsb-log")
 OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "docs", "data")
-RX = (141.40, 43.05)  # receiver lon/lat, rounded to ~1km
+
+
+def _receiver_location():
+    """Precise receiver location if available (~/kikicom-data/receiver-location.json,
+    outside the repo, never committed); falls back to the ~1km-rounded public default."""
+    p = os.path.join(HOME, "kikicom-data", "receiver-location.json")
+    try:
+        with open(p) as f:
+            d = json.load(f)
+        return d["lon"], d["lat"]
+    except (OSError, ValueError, KeyError):
+        return 141.40, 43.05  # rounded to ~1km
+
+
+RX = _receiver_location()  # receiver lon/lat
 GAP_SEC = 600         # split a track when the aircraft was silent this long
 JST = datetime.timezone(datetime.timedelta(hours=9))
 
