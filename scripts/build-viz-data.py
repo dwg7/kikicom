@@ -18,7 +18,7 @@ Outputs (docs/data/, gitignored -- LOCAL PROTOTYPE ONLY):
 NOT FOR PUBLICATION: no military / public-agency filtering is applied yet.
 Publishing needs the reviewed classification policy first (CLAUDE.md).
 """
-import argparse, datetime, glob, json, os, subprocess, time, urllib.request
+import argparse, datetime, glob, json, math, os, subprocess, time, urllib.request
 from collections import defaultdict
 
 HOME = os.path.expanduser("~")
@@ -189,6 +189,58 @@ def alt_of(r):
     return a if isinstance(a, (int, float)) else (0 if a == "ground" else None)
 
 
+# 飛行の性格分類(2026-09-23、CLAUDE.md「受信可能な方角の正確な理解」の続き)。
+# 最接近距離だけで判定する: 目的地/出発地への進入出発なら、たとえ高仰角の
+# 巡航中しか捕まえられなくても経路は空港の近くを通るはずなので、高度条件は
+# 課さない(高度で絞ると低仰角限界で降下し切る前に見失った機を「その他」に
+# 取りこぼしていた。実測で「その他」37.6%→2.2%に改善)
+CTS = (42.7752, 141.6923)  # 新千歳空港(RJCC)
+OKD = (43.1103, 141.3806)  # 丘珠空港(RJCO)
+CTS_RADIUS_KM = 20
+OKD_RADIUS_KM = 15
+CRUISE_ALT_FT = 15000
+
+FLIGHT_CATEGORY_LABELS = {
+    "helicopter": "ヘリ・低空作業",
+    "okadama": "丘珠発着・近傍周回",
+    "chitose": "新千歳発着",
+    "cruise": "巡航通過(高高度)",
+    "mode_s_only": "Mode-Sのみ(位置なし)",
+    "other": "その他・分類不能",
+}
+
+
+def haversine_km(lat1, lon1, lat2, lon2):
+    r1, r2 = math.radians(lat1), math.radians(lat2)
+    dphi, dl = math.radians(lat2 - lat1), math.radians(lon2 - lon1)
+    a = math.sin(dphi / 2) ** 2 + math.cos(r1) * math.cos(r2) * math.sin(dl / 2) ** 2
+    return 6371.0 * 2 * math.asin(math.sqrt(a))
+
+
+def classify_flight(rs):
+    """優先順位: ヘリ(A7) > 丘珠 近傍 > 新千歳 近傍 > 巡航通過(高高度) > その他。
+    位置が一度も取れない機体は Mode-S のみとして別扱い(判定不能)。"""
+    if any(r.get("category") == "A7" for r in rs):
+        return "helicopter"
+    dmin_cts = dmin_okd = None
+    for r in rs:
+        if "lat" in r and "lon" in r:
+            d_cts = haversine_km(r["lat"], r["lon"], *CTS)
+            d_okd = haversine_km(r["lat"], r["lon"], *OKD)
+            dmin_cts = d_cts if dmin_cts is None else min(dmin_cts, d_cts)
+            dmin_okd = d_okd if dmin_okd is None else min(dmin_okd, d_okd)
+    if dmin_cts is None:  # 位置が一度も取れなかった
+        return "mode_s_only"
+    if dmin_okd < OKD_RADIUS_KM:
+        return "okadama"
+    if dmin_cts < CTS_RADIUS_KM:
+        return "chitose"
+    known = [a for a in (alt_of(r) for r in rs) if a is not None]
+    if known and min(known) >= CRUISE_ALT_FT:
+        return "cruise"
+    return "other"
+
+
 def build_tracks(rows):
     # read_log_rows() no longer drops Mode-S-only (no-position) rows -- they still
     # count toward hourly()/build_aircraft()'s aircraft presence, but a line/point
@@ -196,7 +248,7 @@ def build_tracks(rows):
     tracks, points = [], []
     current, last = None, None
     for r in rows:
-        if "lat" not in r:
+        if "lat" not in r or "lon" not in r:
             continue
         if last is None or r["hex"] != last["hex"] or r["now"] - last["now"] > GAP_SEC:
             if current and len(current["coords"]) >= 2:
@@ -277,13 +329,16 @@ def build_aircraft(rows, reg=None):
                            "phase": phase(alts)})
         key = "".join(c for c in hexcode if c.isalnum()).lower()
         info = reg.info(hexcode) if reg else {}
+        fc = classify_flight(rs)
         index.append({"hex": hexcode, "key": key, "flights": flights, **info,
                       "country": country(hexcode), "first": int(rs[0]["now"]),
-                      "last": int(rs[-1]["now"]), "n": len(rs), "passes": passes})
+                      "last": int(rs[-1]["now"]), "n": len(rs), "passes": passes,
+                      "flight_category": fc})
         files[key] = {
             "hex": hexcode, "flights": flights, "country": country(hexcode), **info,
             "category": next((r["category"] for r in reversed(rs) if r.get("category")), None),
             "squawk": next((r["squawk"] for r in reversed(rs) if r.get("squawk")), None),
+            "flight_category": fc,
             "passes": passes,
             "series": {
                 "t": [round(r["now"], 1) for r in rs],
@@ -474,6 +529,7 @@ def main():
         stats["hourly"] = prev.get("hourly", [])
         stats["coverage"] = prev.get("coverage")
         stats["window"] = prev.get("window", {})
+        stats["flight_categories"] = prev.get("flight_categories")
     else:
         rows = read_log_rows(min(now - args.hours * 3600, now - 24 * 3600))
         win = [r for r in rows if r["now"] >= now - args.hours * 3600]
@@ -486,6 +542,13 @@ def main():
         stats["coverage"] = {"last": cov["last"], "rate_24h": cov["rate_24h"],
                              "samples_24h": cov["samples_24h"], "missing_24h": cov["missing_24h"]}
         index, files = build_aircraft(rows, reg)
+        cat_counts = defaultdict(int)
+        for a in index:
+            cat_counts[a["flight_category"]] += 1
+        stats["flight_categories"] = {
+            "labels": FLIGHT_CATEGORY_LABELS, "total": len(index),
+            "counts": {k: cat_counts.get(k, 0) for k in FLIGHT_CATEGORY_LABELS},
+        }
         ac_dir = os.path.join(OUT_DIR, "aircraft")
         os.makedirs(ac_dir, exist_ok=True)
         for key, obj in files.items():

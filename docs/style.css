@@ -86,6 +86,13 @@
 .kikicom-polar-col { flex-direction: column; align-items: center; }
 .kikicom-polar-since { margin: 4px 0 0; text-align: center; }
 
+/* 飛行カテゴリの内訳(新千歳発着・丘珠発着・巡航通過など) */
+.kikicom-cat-bar { display: flex; height: 22px; border-radius: 4px; overflow: hidden; margin-bottom: 10px; }
+.kikicom-cat-seg { height: 100%; }
+.kikicom-cat-legend { display: flex; flex-wrap: wrap; gap: 8px 16px; font-size: 12px; color: #ccc; }
+.kikicom-cat-legend-item { display: inline-flex; align-items: center; gap: 6px; }
+.kikicom-cat-swatch { width: 12px; height: 12px; border-radius: 2px; display: inline-block; }
+
 /* 注目機(scripts/watchlist.json) */
 .kikicom-watch-row td { color: #ffb366; font-weight: bold; }
 .kikicom-timeline-watch { fill: #ffb366; font-weight: bold; }

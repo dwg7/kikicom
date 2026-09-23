@@ -303,6 +303,43 @@
     container.appendChild(svg);
   }
 
+  // 飛行カテゴリの内訳(scripts/build-viz-data.py の classify_flight() と対応)
+  var FLIGHT_CAT_COLORS = {
+    chitose: '#3498db', okadama: '#9b59b6', cruise: '#2ecc71',
+    helicopter: '#e67e22', mode_s_only: '#7f8c8d', other: '#555555'
+  };
+  var FLIGHT_CAT_ORDER = ['chitose', 'okadama', 'cruise', 'helicopter', 'mode_s_only', 'other'];
+
+  function renderFlightCategories(container, fc) {
+    container.textContent = '';
+    if (!fc || !fc.total) {
+      container.appendChild(el('p', 'kikicom-caption', 'まだ蓄積されたデータがありません。'));
+      return;
+    }
+    var bar = el('div', 'kikicom-cat-bar');
+    var legend = el('div', 'kikicom-cat-legend');
+    FLIGHT_CAT_ORDER.forEach(function (key) {
+      var n = (fc.counts && fc.counts[key]) || 0;
+      if (!n) { return; }
+      var frac = n / fc.total, pct = Math.round(frac * 100);
+      var label = (fc.labels && fc.labels[key]) || key;
+      var color = FLIGHT_CAT_COLORS[key] || '#555';
+      var seg = el('div', 'kikicom-cat-seg');
+      seg.style.width = (frac * 100) + '%';
+      seg.style.background = color;
+      seg.title = label + ': ' + n + '機(' + pct + '%)';
+      bar.appendChild(seg);
+      var item = el('div', 'kikicom-cat-legend-item');
+      var sw = el('span', 'kikicom-cat-swatch');
+      sw.style.background = color;
+      item.appendChild(sw);
+      item.appendChild(document.createTextNode(label + ' ' + n + '機(' + pct + '%)'));
+      legend.appendChild(item);
+    });
+    container.appendChild(bar);
+    container.appendChild(legend);
+  }
+
   function renderTable(container, rows) {
     container.textContent = '';
     if (!rows || !rows.length) {
@@ -521,6 +558,15 @@
       '急な低下は、運航の乱れより先に結露・凍結・アンテナの移動を疑う。'));
     root.appendChild(covPanel);
 
+    var catPanel = el('div', 'kikicom-panel');
+    catPanel.appendChild(el('h2', 'kikicom-panel-title', '飛行カテゴリの内訳(直近24時間)'));
+    var catBody = el('div');
+    catPanel.appendChild(catBody);
+    catPanel.appendChild(el('p', 'kikicom-caption',
+      '最接近距離で判定(丘珠15km以内・新千歳20km以内。どちらにも該当せず最低高度15,000ft以上は巡航通過)。' +
+      '位置が一度も取れない機体は「Mode-Sのみ」。優先順位: ヘリ(A7) > 丘珠 > 新千歳 > 巡航通過 > その他。'));
+    root.appendChild(catPanel);
+
     var row = el('div', 'kikicom-two-col');
     var plotPanel = el('div', 'kikicom-panel');
     plotPanel.appendChild(el('h2', 'kikicom-panel-title', '時間別の受信機体数(直近24時間)'));
@@ -548,7 +594,7 @@
     root.appendChild(footer);
     container.appendChild(root);
 
-    return { cards: cards, mapEl: mapEl, plotBody: plotBody, tableBody: tableBody, footer: footer,
+    return { cards: cards, mapEl: mapEl, plotBody: plotBody, catBody: catBody, tableBody: tableBody, footer: footer,
       covSeries: covSeries, covPolar: covPolar };
   }
 
@@ -1051,6 +1097,7 @@
           renderCards(parts.cards, stats);
           renderTable(parts.tableBody, stats && stats.live && stats.live.table);
           renderHourly(parts.plotBody, stats && stats.hourly);
+          renderFlightCategories(parts.catBody, stats && stats.flight_categories);
           parts.footer.textContent = 'データ生成時刻: ' + ((stats && stats.generated_at) || '—');
           if (ready) { setSource(map, 'live', res[0]); }
         });
