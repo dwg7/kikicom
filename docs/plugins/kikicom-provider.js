@@ -843,7 +843,11 @@
   function fitAircraft(map, s, range, receiver) {
     var b = new maplibregl.LngLatBounds([receiver.lon, receiver.lat], [receiver.lon, receiver.lat]);
     for (var i = 0; i < s.t.length; i += 1) {
-      if (s.t[i] >= range[0] && s.t[i] <= range[1]) { b.extend([s.lon[i], s.lat[i]]); }
+      // Mode-S-only(位置なし)の点は lon/lat が null。extend に渡すと bounds が壊れ、
+      // fitBounds が効かなくなって前の通過のビューのまま固まる(2026-09-24)
+      if (s.t[i] >= range[0] && s.t[i] <= range[1] && s.lon[i] != null && s.lat[i] != null) {
+        b.extend([s.lon[i], s.lat[i]]);
+      }
     }
     map.fitBounds(b, { padding: 40, maxZoom: 11, duration: 0 });
   }
