@@ -218,8 +218,11 @@ def haversine_km(lat1, lon1, lat2, lon2):
 
 
 def classify_flight(rs):
-    """優先順位: ヘリ(A7) > 丘珠 近傍 > 新千歳 近傍 > 巡航通過(高高度) > その他。
-    位置が一度も取れない機体は Mode-S のみとして別扱い(判定不能)。"""
+    """1回の通過(passes_of() の1要素)の行を渡すこと。機体単位(1日分すべて)で
+    渡すと、1日に複数便飛ぶ機体で性格の違う便が1つの区分に潰れる(2026-09-24、
+    実測で179機中53機がこれで割れた)。
+    優先順位: ヘリ(A7) > 丘珠 近傍 > 新千歳 近傍 > 巡航通過(高高度) > その他。
+    位置が一度も取れない通過は Mode-S のみとして別扱い(判定不能)。"""
     if any(r.get("category") == "A7" for r in rs):
         return "helicopter"
     dmin_cts = dmin_okd = None
@@ -326,19 +329,20 @@ def build_aircraft(rows, reg=None):
                            "alt_max": max(known) if known else None,
                            "alt_mean": round(sum(known) / len(known)) if known else None,
                            "dst_min": min(ds) if ds else None,
-                           "phase": phase(alts)})
+                           "phase": phase(alts),
+                           # 通過(パス)ごとに判定する。機体単位(1日分の行をまとめて)で
+                           # 判定すると、1日に複数便飛ぶ機体で性格の違う便が1つの区分に
+                           # 潰れてしまう(実測で179機中53機がこれで割れた。2026-09-24)
+                           "flight_category": classify_flight(ps)})
         key = "".join(c for c in hexcode if c.isalnum()).lower()
         info = reg.info(hexcode) if reg else {}
-        fc = classify_flight(rs)
         index.append({"hex": hexcode, "key": key, "flights": flights, **info,
                       "country": country(hexcode), "first": int(rs[0]["now"]),
-                      "last": int(rs[-1]["now"]), "n": len(rs), "passes": passes,
-                      "flight_category": fc})
+                      "last": int(rs[-1]["now"]), "n": len(rs), "passes": passes})
         files[key] = {
             "hex": hexcode, "flights": flights, "country": country(hexcode), **info,
             "category": next((r["category"] for r in reversed(rs) if r.get("category")), None),
             "squawk": next((r["squawk"] for r in reversed(rs) if r.get("squawk")), None),
-            "flight_category": fc,
             "passes": passes,
             "series": {
                 "t": [round(r["now"], 1) for r in rs],
@@ -543,10 +547,13 @@ def main():
                              "samples_24h": cov["samples_24h"], "missing_24h": cov["missing_24h"]}
         index, files = build_aircraft(rows, reg)
         cat_counts = defaultdict(int)
+        total_passes = 0
         for a in index:
-            cat_counts[a["flight_category"]] += 1
+            for p in a["passes"]:
+                cat_counts[p["flight_category"]] += 1
+                total_passes += 1
         stats["flight_categories"] = {
-            "labels": FLIGHT_CATEGORY_LABELS, "total": len(index),
+            "labels": FLIGHT_CATEGORY_LABELS, "total": total_passes,
             "counts": {k: cat_counts.get(k, 0) for k in FLIGHT_CATEGORY_LABELS},
         }
         ac_dir = os.path.join(OUT_DIR, "aircraft")

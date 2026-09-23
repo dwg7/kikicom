@@ -559,12 +559,13 @@
     root.appendChild(covPanel);
 
     var catPanel = el('div', 'kikicom-panel');
-    catPanel.appendChild(el('h2', 'kikicom-panel-title', '飛行カテゴリの内訳(直近24時間)'));
+    catPanel.appendChild(el('h2', 'kikicom-panel-title', '飛行カテゴリの内訳(直近24時間・通過ごと)'));
     var catBody = el('div');
     catPanel.appendChild(catBody);
     catPanel.appendChild(el('p', 'kikicom-caption',
+      '機体ごとではなく通過(パス)ごとに判定(1機が1日に複数便飛べば、便ごとに別区分になりうる)。' +
       '最接近距離で判定(丘珠15km以内・新千歳20km以内。どちらにも該当せず最低高度15,000ft以上は巡航通過)。' +
-      '位置が一度も取れない機体は「Mode-Sのみ」。優先順位: ヘリ(A7) > 丘珠 > 新千歳 > 巡航通過 > その他。'));
+      '位置が一度も取れない通過は「Mode-Sのみ」。優先順位: ヘリ(A7) > 丘珠 > 新千歳 > 巡航通過 > その他。'));
     root.appendChild(catPanel);
 
     var row = el('div', 'kikicom-two-col');
