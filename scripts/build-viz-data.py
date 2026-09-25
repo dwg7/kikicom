@@ -144,6 +144,24 @@ def country(hexcode):
     return ""
 
 
+def _read_jsonl_file(path):
+    if path.endswith(".zst"):
+        text = subprocess.run(["zstd", "-dc", path], capture_output=True,
+                              text=True, check=True).stdout
+    elif path.endswith(".jsonl"):
+        with open(path) as f:
+            text = f.read()
+    else:
+        return []
+    rows = []
+    for line in text.splitlines():
+        try:
+            rows.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue  # a line cut mid-write by rsync
+    return rows
+
+
 def read_log_rows(since):
     rows = []
     for path in sorted(glob.glob(os.path.join(LOG_DIR, "*.jsonl*"))):
@@ -155,19 +173,7 @@ def read_log_rows(since):
             continue
         if day_end < since:
             continue
-        if path.endswith(".zst"):
-            text = subprocess.run(["zstd", "-dc", path], capture_output=True,
-                                  text=True, check=True).stdout
-        elif path.endswith(".jsonl"):
-            with open(path) as f:
-                text = f.read()
-        else:
-            continue
-        for line in text.splitlines():
-            try:
-                r = json.loads(line)
-            except json.JSONDecodeError:
-                continue  # a line cut mid-write by rsync
+        for r in _read_jsonl_file(path):
             if r.get("now", 0) >= since:
                 rows.append(r)
     rows.sort(key=lambda r: (r["hex"], r["now"]))
@@ -361,6 +367,80 @@ def build_aircraft(rows, reg=None):
         }
     index.sort(key=lambda a: a["first"])
     return index, files
+
+
+RANKING_CACHE = os.path.join(HOME, "kikicom-data", "ranking-cache.json")
+
+
+def _day_summary(rows):
+    """Per-hex pass count/first/last/flights/row-count for one day's rows."""
+    by_hex = defaultdict(list)
+    for r in rows:
+        by_hex[r["hex"]].append(r)
+    out = {}
+    for hexcode, rs in by_hex.items():
+        rs.sort(key=lambda r: r["now"])
+        flights = []
+        for r in rs:
+            f = (r.get("flight") or "").strip()
+            if f and f not in flights:
+                flights.append(f)
+        out[hexcode] = {"passes": len(passes_of(rs)), "n": len(rs),
+                        "first": rs[0]["now"], "last": rs[-1]["now"], "flights": flights}
+    return out
+
+
+def build_ranking(reg, now):
+    """Cumulative (all-time) pass counts per aircraft, for the repeater-ranking view.
+    Finished days (before today, UTC) are cached in RANKING_CACHE, so a rebuild only
+    re-parses today's still-growing log file -- not the whole history every run."""
+    try:
+        with open(RANKING_CACHE) as f:
+            cache = json.load(f)
+    except (OSError, ValueError):
+        cache = {}
+    today = datetime.datetime.fromtimestamp(now, datetime.timezone.utc).strftime("%Y-%m-%d")
+    by_day = defaultdict(list)
+    for path in sorted(glob.glob(os.path.join(LOG_DIR, "*.jsonl*"))):
+        by_day[os.path.basename(path)[:10]].append(path)
+    dirty = False
+    for day, paths in by_day.items():
+        if day == today or day in cache:
+            continue
+        rows = [r for p in paths for r in _read_jsonl_file(p)]
+        cache[day] = _day_summary(rows)
+        dirty = True
+    if dirty:
+        tmp = RANKING_CACHE + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(cache, f, ensure_ascii=False)
+        os.replace(tmp, RANKING_CACHE)
+
+    today_rows = [r for p in by_day.get(today, []) for r in _read_jsonl_file(p)]
+    all_days = dict(cache)
+    all_days[today] = _day_summary(today_rows)
+
+    totals = defaultdict(lambda: {"passes": 0, "n": 0, "first": None, "last": None, "flights": []})
+    for day_map in all_days.values():
+        for hexcode, d in day_map.items():
+            t = totals[hexcode]
+            t["passes"] += d["passes"]
+            t["n"] += d["n"]
+            t["first"] = d["first"] if t["first"] is None else min(t["first"], d["first"])
+            t["last"] = d["last"] if t["last"] is None else max(t["last"], d["last"])
+            for f in d["flights"]:
+                if f not in t["flights"]:
+                    t["flights"].append(f)
+
+    ranking = []
+    for hexcode, t in totals.items():
+        key = "".join(c for c in hexcode if c.isalnum()).lower()
+        info = reg.info(hexcode) if reg else {}
+        ranking.append({"hex": hexcode, "key": key, "flights": t["flights"], **info,
+                        "country": country(hexcode), "first": int(t["first"]), "last": int(t["last"]),
+                        "n": t["n"], "passes": t["passes"]})
+    ranking.sort(key=lambda a: -a["passes"])
+    return ranking
 
 
 COVERAGE_DIR = os.path.join(HOME, "kikicom-data", "coverage")
@@ -562,8 +642,10 @@ def main():
             write_json(os.path.join("aircraft", key + ".json"), obj)
         write_json(os.path.join("aircraft", "index.json"),
                    {"generated_at": int(now), "hours": 24, "aircraft": index})
+        write_json(os.path.join("aircraft", "ranking.json"),
+                   {"generated_at": int(now), "aircraft": build_ranking(reg, now)})
         for name in os.listdir(ac_dir):  # drop aircraft that left the 24h window
-            if name.endswith(".json") and name != "index.json" and name[:-5] not in files:
+            if name.endswith(".json") and name not in ("index.json", "ranking.json") and name[:-5] not in files:
                 os.remove(os.path.join(ac_dir, name))
         stats["window"] = {"hours": args.hours, "positions": len(win),
                            "aircraft": len({r["hex"] for r in win}),

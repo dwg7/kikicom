@@ -44,6 +44,7 @@
 .kikicom-table { border-collapse: collapse; width: 100%; font-size: 12px; font-variant-numeric: tabular-nums; }
 .kikicom-table th, .kikicom-table td { border-bottom: 1px solid #333; padding: 5px 8px; text-align: left; white-space: nowrap; }
 .kikicom-table th { color: #999; font-weight: normal; font-size: 11px; }
+.kikicom-cell-wrap { white-space: normal !important; max-width: 320px; }
 .kikicom-caption { color: #888; font-size: 12px; }
 .kikicom-footer { color: #666; font-size: 11px; margin-top: 8px; }
 

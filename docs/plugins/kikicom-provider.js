@@ -644,6 +644,14 @@
     return (a.flights && a.flights.length ? a.flights.join('/') : (a.reg || '(便名なし)')) + ' ' + a.hex;
   }
 
+  // 機体登録は1機に1つだが便名は日によって複数つく(ローテーション運航)ので、
+  // 多いときは主要な数件+残数だけ表示する
+  function flightsLabel(flights, max) {
+    if (!flights || !flights.length) { return '—'; }
+    if (flights.length <= max) { return flights.join(' / '); }
+    return flights.slice(0, max).join(' / ') + ' 他' + (flights.length - max) + '便';
+  }
+
   function aircraftPath(key) {
     return '#/browse/' + NAMESPACE + ':' + ROOT_KEY + '/' + NAMESPACE + ':aircraft/' + NAMESPACE + ':ac-' + key;
   }
@@ -657,6 +665,17 @@
       });
     }
     return indexCache.promise;
+  }
+
+  var rankingCache = { at: 0, promise: null };
+  function fetchRanking() {
+    if (!rankingCache.promise || Date.now() - rankingCache.at > 60000) {
+      rankingCache.at = Date.now();
+      rankingCache.promise = fetchJson('data/aircraft/ranking.json').then(function (d) {
+        return (d && d.aircraft) || [];
+      });
+    }
+    return rankingCache.promise;
   }
 
   // 全機体のタイムライン(1機1行、通過ごとの横棒、色は平均高度)
@@ -706,6 +725,70 @@
     });
     container.appendChild(svg);
   }
+
+  // リピーターランキング(観測開始からの累計、通過回数の多い順)
+  function renderRanking(container, list) {
+    container.textContent = '';
+    if (!list.length) {
+      container.appendChild(el('p', 'kikicom-caption', 'まだ機体の記録がありません。'));
+      return;
+    }
+    var ranked = list.slice().sort(function (a, b) { return b.passes - a.passes; });
+    var table = el('table', 'kikicom-table');
+    var head = el('tr');
+    ['#', '登録', '便名', '機種', '所有者', '国', '通過回数'].forEach(function (h) {
+      head.appendChild(el('th', null, h));
+    });
+    table.appendChild(head);
+    ranked.forEach(function (a, i) {
+      var tr = el('tr', 'kikicom-pass-row' + (a.watch ? ' kikicom-watch-row' : ''));
+      tr.appendChild(el('td', null, String(i + 1)));
+      tr.appendChild(el('td', null, (a.watch ? '★ ' : '') + (a.reg || a.hex)));
+      tr.appendChild(el('td', 'kikicom-cell-wrap', flightsLabel(a.flights, 4)));
+      tr.appendChild(el('td', null, a.type || '—'));
+      tr.appendChild(el('td', null, a.owner || '—'));
+      tr.appendChild(el('td', null, a.country || '—'));
+      tr.appendChild(el('td', null, String(a.passes)));
+      tr.title = 'クリックでこの機体のページへ';
+      tr.addEventListener('click', function () { window.location.hash = aircraftPath(a.key); });
+      table.appendChild(tr);
+    });
+    container.appendChild(table);
+  }
+
+  var rankingViewProvider = {
+    key: 'kikicom.ranking.view',
+    name: 'リピーターランキング',
+    canView: function (o) { return o.type === 'kikicom.ranking'; },
+    view: function () {
+      var root, body, timer;
+      function refresh() {
+        rankingCache.at = 0;
+        fetchRanking().then(function (list) {
+          if (!body) { return; }
+          var sub = root.querySelector('.kikicom-subtitle');
+          sub.textContent = '観測を始めてから(累計)、通過回数が多かった機体の順(1機で何度も飛ぶ地元便・往復便が上位に来る)。' +
+            list.length + ' 機。行をクリックするとその機体のページへ(直近24時間の記録が残っていない機体は、その旨だけ表示されます)。';
+          renderRanking(body, list);
+        });
+      }
+      return {
+        show: function (element) {
+          root = el('div', 'kikicom-dashboard');
+          root.appendChild(el('h1', 'kikicom-title', 'リピーターランキング'));
+          root.appendChild(el('p', 'kikicom-subtitle', ''));
+          var panel = el('div', 'kikicom-panel');
+          body = el('div', 'kikicom-table-wrap');
+          panel.appendChild(body);
+          root.appendChild(panel);
+          element.appendChild(root);
+          refresh();
+          timer = setInterval(refresh, TRACK_MS);
+        },
+        destroy: function () { clearInterval(timer); body = undefined; root = undefined; }
+      };
+    }
+  };
 
   var timelineViewProvider = {
     key: 'kikicom.timeline.view',
@@ -1059,11 +1142,16 @@
       if (key === ROOT_KEY) {
         return Promise.resolve({
           identifier: identifier, name: 'kikicom 上空ダッシュボード', type: 'kikicom.root', location: 'ROOT',
-          composition: [{ namespace: NAMESPACE, key: 'timeline' }, { namespace: NAMESPACE, key: 'aircraft' }]
+          composition: [{ namespace: NAMESPACE, key: 'timeline' }, { namespace: NAMESPACE, key: 'ranking' },
+            { namespace: NAMESPACE, key: 'aircraft' }]
         });
       }
       if (key === 'timeline') {
         return Promise.resolve({ identifier: identifier, name: '機体タイムライン', type: 'kikicom.timeline',
+          location: NAMESPACE + ':' + ROOT_KEY });
+      }
+      if (key === 'ranking') {
+        return Promise.resolve({ identifier: identifier, name: 'リピーターランキング', type: 'kikicom.ranking',
           location: NAMESPACE + ':' + ROOT_KEY });
       }
       if (key === 'aircraft') {
@@ -1170,11 +1258,15 @@
     openmct.types.addType('kikicom.timeline', {
       name: '機体タイムライン', description: '直近24時間の機体ごとの観測区間', cssClass: 'icon-timeline', creatable: false
     });
+    openmct.types.addType('kikicom.ranking', {
+      name: 'リピーターランキング', description: '直近24時間、通過回数の多い機体の順', cssClass: 'icon-tabular', creatable: false
+    });
     openmct.types.addType('kikicom.aircraft', {
       name: '機体', description: 'ICAOアドレス単位の機体モニター', cssClass: 'icon-telemetry', creatable: false
     });
     openmct.objectViews.addProvider(dashboardViewProvider);
     openmct.objectViews.addProvider(timelineViewProvider);
+    openmct.objectViews.addProvider(rankingViewProvider);
     openmct.composition.addProvider(aircraftComposition);
     openmct.objectViews.addProvider(aircraftViewProvider);
   };
