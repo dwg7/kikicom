@@ -544,3 +544,26 @@ ICAOアドレス)であり、性質が異なる。**軍用機の除外ロジッ�
 レビューだけは必ず人が確認する範囲とし**、それ以外(GeoJSON変換、
 可視化ページの実装等)はkikimimiほど重いレビュー体制を持ち込む必要は
 無いと考えている。この整理自体、プロジェクトが進んだ段階で見直してよい。
+
+---
+
+## 8. 衛星(CubeSat)受信の試験(2026-11-05〜、期間限定)
+
+アアルト大学の Foresail-1p(437.125MHz)と Suomi-100(437.775MHz)のテレメトリ受信を試す。
+**ADS-B の基準線が最優先**で、衛星は RTL-SDR を期限付きで借りるだけ(既定は常に ADS-B 稼働)。
+設計・決定事項(D1〜D6)・段階(P0〜P3)・未決事項は `documents/satellite/README.md`。
+
+- 現在地: **P0 稼働中**(2026-11-05 23:31〜)。RPi の `sat-plan.timer` が 6 時間ごとに今後 48 時間の
+  パスを予測し、`~/sat/schedule.json` に「止めるはずだった窓」を残す。ADS-B には一切触れない。
+  導入・確認は `scripts/install-sat-service.sh`(`KIKICOM_RPI_HOST` を指定)。
+- **P1 準備済み(2026-11-06)**: 手動 1 回の窓(`scripts/sat/arm-window.sh`、`sat-window.sh`、
+  `iq-analyze.py`)。1 回目は 2026-11-07 09:13:40〜(Suomi-100、約 5 分、ADS-B が止まる。ユーザー承認済み)。
+  この日までに、アンテナは試験的に垂直ダイポール約 14+14cm にしてある(`documents/antenna-placements.tsv`、
+  11/6 22:15。早期中止の基準は 11/7 22:15 の 24 時間で受信率 15% 未満なら 7+7cm に戻す)。
+- 試験は 2 週間。CW ビーコンの検出に失敗したら、アンテナを戻して基準線を再開する(撤退基準)。
+- ADS-B の停止は、窓の合計で 1 日 45 分まで。窓の間の受信ゼロは欠測として基準線から除外する。
+- コードは `scripts/sat/` と `scripts/install-sat-service.sh`。RPi の python 環境は `~/kikicom-sat/`
+  (micromamba、skyfield)。データは RPi の `~/sat/` と slate の `~/kikicom-data/satellite/`(リポジトリ外)。
+- SatNOGS 由来のデータは CC BY-SA。CC0 の公開物に混ぜない(§4)。観測点の正確な位置は RPi の
+  `~/sat/location.json` にだけ置く。
+

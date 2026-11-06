@@ -1,0 +1,18 @@
+{
+  "_note": "Source of truth for the RPi's ~/sat/config.json (scripts/install-sat-service.sh copies it). See documents/satellite/README.md.",
+  "targets": [
+    {"name": "FORESAIL-1P", "norad": 66778, "freq_mhz": 437.125, "priority": 2, "enabled": true},
+    {"name": "SUOMI-100", "norad": 43804, "freq_mhz": 437.775, "priority": 2, "enabled": true},
+    {"name": "FUNCUBE-1 (AO-73)", "norad": 39444, "freq_mhz": 145.935, "priority": 0, "enabled": false}
+  ],
+  "mask": "90-200:15,200-360:45,0-90:60",
+  "min_max_el": 20,
+  "min_usable_s": 90,
+  "min_usable_el": 15,
+  "window_pad_s": 30,
+  "daily_cap_min": 45,
+  "min_gap_min": 5,
+  "horizon_h": 48,
+  "tle_refresh_h": 6,
+  "tle_max_age_days": 5
+}
