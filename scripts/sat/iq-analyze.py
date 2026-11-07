@@ -7,7 +7,7 @@ Runs on the RPi under the "sat" python (numpy + skyfield):
 It reads <file>.json (written by sat-window.sh), predicts the Doppler shift
 along the recorded pass from the TLE, and
 
-  1. report: per 100 ms frame, the power in a 12 kHz band that follows the
+  1. report: per 100 ms frame (the dongle's DC spike at 0 Hz is left out), the power in a 12 kHz band that follows the
      predicted Doppler vs. the power in reference bands 15-40 kHz to either
      side. A real GMSK burst shows up as a few frames well above the rest.
      Also the satellite's azimuth/elevation during the recording.
@@ -28,6 +28,7 @@ JST = datetime.timezone(datetime.timedelta(hours=9))
 UTC = datetime.timezone.utc
 FRAME_S = 0.1
 CHUNK_S = 10.0
+DC_NOTCH_HZ = 1500.0  # ignore bins this close to 0 Hz (the dongle's DC spike, +20-30 dB)
 
 
 def load_sat(path, ts):
@@ -127,11 +128,13 @@ def main():
             p = (np.abs(np.fft.fftshift(np.fft.fft(blk, axis=2), axes=2)) ** 2).mean(axis=1)  # (nf, nfft)
             tf = t0 + (done + (np.arange(nf) + 0.5) * frame_n) / rate
             offs = offset_at(tf)
+            pm = p.copy()
+            pm[:, abs(np.arange(nfft) - nfft // 2) * fs_bin < DC_NOTCH_HZ] = np.nan  # RTL-SDR's DC spike
             for k in range(nf):
                 c = int(round(offs[k] / fs_bin)) + nfft // 2
                 w_in, lo1, lo2 = int(6000 / fs_bin), int(15000 / fs_bin), int(40000 / fs_bin)
-                inb = p[k, c - w_in: c + w_in + 1].mean()
-                ref = np.concatenate([p[k, c - lo2: c - lo1], p[k, c + lo1: c + lo2]]).mean()
+                inb = np.nanmean(pm[k, c - w_in: c + w_in + 1])
+                ref = np.nanmean(np.concatenate([pm[k, c - lo2: c - lo1], pm[k, c + lo1: c + lo2]]))
                 ratios.append(10 * np.log10(inb / ref))
                 times.append(tf[k])
         if out is not None:
