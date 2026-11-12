@@ -15,6 +15,10 @@ along the recorded pass from the TLE, and
      signal sits at 0 Hz), ready for
          gr_satellites "Suomi 100" --rawfile X.dc.cf32 --iq --samp_rate 250000
 
+For a recording made away from home (portable), give the observer position on the command line:
+    python3 iq-analyze.py X.u8 --norad 66778 --lat <deg> --lon <deg> [--elev <m>]
+(the real coordinates never go into the repo; the default is <home>/location.json).
+
 Sign convention: a satellite that approaches is received ABOVE its transmit
 frequency (shift = -f * range_rate / c, range_rate < 0 on approach).
 """
@@ -74,7 +78,22 @@ def main():
     ap.add_argument("--tx-mhz", type=float, help="satellite transmit frequency (default: recording centre)")
     ap.add_argument("--start-epoch", type=float, help="override the time of the first sample (unix, UTC)")
     ap.add_argument("--no-correct", action="store_true", help="skip writing the Doppler-corrected file")
+    ap.add_argument("--period", type=float, default=60.0, help="beacon period for the periodic search (s). "
+                    "Measured on real recordings: Suomi 100 60.000 s (sd 0.005 s); Foresail-1p 59.2 s (sd 0.9 s, 57.2-60.4 s)")
+    ap.add_argument("--jitter", type=float, default=1.0, help="allowed deviation of each beacon from the period (s). "
+                    "Suomi 100: 0.1 is enough; Foresail-1p: 3")
+    ap.add_argument("--windows", default="0.1,0.5,1.0", help="burst integration windows (s). Foresail-1p beacons are "
+                    "0.4-1.3 s multi-frame bursts, Suomi 100 a single frame")
+    ap.add_argument("--no-fold", action="store_true", help="skip the periodic search")
+    ap.add_argument("--lat", type=float, help="observer latitude (deg) for a portable recording; overrides <home>/location.json. "
+                    "Needs --lon. Give the real coordinates only on the command line, never in the repo")
+    ap.add_argument("--lon", type=float, help="observer longitude (deg); needs --lat")
+    ap.add_argument("--elev", type=float, help="observer elevation (m); default: location.json's elev_m, else 30")
     args = ap.parse_args()
+    if (args.lat is None) != (args.lon is None):
+        ap.error("--lat and --lon go together")
+    if args.lat is not None and not (-90 <= args.lat <= 90 and -180 <= args.lon <= 180):
+        ap.error("--lat/--lon out of range")
 
     meta = json.load(open(os.path.splitext(args.iq)[0] + ".json"))
     rate = float(meta["samp_rate"])
@@ -90,8 +109,13 @@ def main():
 
     ts = load.timescale()
     sat = load_sat(args.tle or os.path.join(args.home, "tle", f"{args.norad}.tle"), ts)
-    loc = json.load(open(os.path.join(args.home, "location.json")))
-    here = wgs84.latlon(loc["lat"], loc["lon"], elevation_m=loc.get("elev_m", 30.0))
+    if args.lat is not None:  # portable recording: coordinates given on the command line
+        loc = {"lat": args.lat, "lon": args.lon}
+        print("observer: from --lat/--lon (not the home location.json)")
+    else:
+        loc = json.load(open(os.path.join(args.home, "location.json")))
+    here = wgs84.latlon(loc["lat"], loc["lon"],
+                        elevation_m=args.elev if args.elev is not None else loc.get("elev_m", 30.0))
     print(f"TLE epoch {sat.epoch.utc_strftime('%Y-%m-%d %H:%M')} UTC, {(ts.from_datetime(datetime.datetime.fromtimestamp(t0, UTC)).tt - sat.epoch.tt):.1f} days old at the recording")
 
     grid, shift, alt, az = doppler_track(sat, here, ts, t0, dur, f_tx)
@@ -114,7 +138,7 @@ def main():
     frame_n = int(rate * FRAME_S)
     sub = frame_n // nfft
     window = np.hanning(nfft).astype(np.float32)
-    ratios, times = [], []
+    ratios, times, inb_l, ref_l = [], [], [], []
     phase = 0.0
     out = None if args.no_correct else open(os.path.splitext(args.iq)[0] + ".dc.cf32", "wb")
     done = 0
@@ -136,6 +160,8 @@ def main():
                 inb = np.nanmean(pm[k, c - w_in: c + w_in + 1])
                 ref = np.nanmean(np.concatenate([pm[k, c - lo2: c - lo1], pm[k, c + lo1: c + lo2]]))
                 ratios.append(10 * np.log10(inb / ref))
+                inb_l.append(inb)
+                ref_l.append(ref)
                 times.append(tf[k])
         if out is not None:
             ph = phase + 2 * np.pi * np.cumsum(offset_at(t)) / rate
@@ -176,6 +202,53 @@ def main():
         row.append(f"{datetime.datetime.fromtimestamp(t0 + 10 * i, JST):%H:%M:%S} {z[m].max():+5.1f}" if m.any() else "")
     for i in range(0, len(row), 4):
         print("  " + "   ".join(row[i:i + 4]))
+
+    if not args.no_fold:
+        wins = [float(v) for v in args.windows.split(",")]
+        periodic_search(np.array(inb_l), np.array(ref_l), FRAME_S, wins, args.period, args.jitter)
+
+
+def periodic_search(inb, ref, dt, wins, period, jitter):
+    """Look for a burst that repeats every `period` seconds (+-`jitter`), which a single 100 ms frame cannot show.
+
+    For each window length W (a burst integrated over W seconds), z(i) is the robust z-score of the in-band/reference
+    power ratio over the W seconds starting at frame i. For every phase p in one period,
+        S(p) = sum over k of  max_{|d| <= jitter} z(p + k*period + d)
+    A real periodic beacon makes S large at one phase; noise does not. The significance is how far the best S stands
+    above the other phases (median/MAD over all phases). The null is the other phases, so the look-elsewhere effect
+    over phases and windows is built in; with ~600 phases the best noise-only phase is usually below ~4.
+    """
+    n = len(inb)
+    p_n, j_n = int(round(period / dt)), int(round(jitter / dt))
+    k_n = (n - 2 * j_n - 1) // p_n
+    print(f"\nperiodic search: period {period:g} s +-{jitter:g} s, windows {', '.join(f'{w:g} s' for w in wins)}")
+    if k_n < 2:
+        print(f"  recording holds only {k_n} whole period(s); needs at least 2 (about {2 * period + 2 * jitter:.0f} s)")
+        return
+    ci, cr = np.cumsum(np.r_[0.0, inb]), np.cumsum(np.r_[0.0, ref])
+    for w_s in wins:
+        w_n = max(1, int(round(w_s / dt)))
+        rr = 10 * np.log10((ci[w_n:] - ci[:-w_n]) / (cr[w_n:] - cr[:-w_n]))
+        med = np.median(rr)
+        sig = 1.4826 * np.median(np.abs(rr - med)) or 1e-9
+        z = (rr - med) / sig
+        pad = np.r_[np.full(j_n, z.min()), z, np.full(j_n, z.min())]
+        zmax = np.max([pad[j_n + d: j_n + d + len(z)] for d in range(-j_n, j_n + 1)], axis=0)
+        idx = np.minimum(np.arange(p_n)[:, None] + p_n * np.arange(k_n)[None, :], len(z) - 1)
+        s = zmax[idx].sum(axis=1)
+        s0 = np.median(s)
+        ssig = 1.4826 * np.median(np.abs(s - s0)) or 1e-9
+        order = np.argsort(-s)
+        best = int(order[0])
+        far = [int(q) for q in order if min(abs(q - best), p_n - abs(q - best)) > 2 * j_n + w_n][:1]
+        second = (s[far[0]] - s0) / ssig if far else float("nan")
+        hits = []
+        for k in range(k_n):
+            lo = best + k * p_n - j_n
+            seg = z[max(lo, 0): lo + 2 * j_n + 1]
+            hits.append(f"{(max(lo, 0) + int(np.argmax(seg))) * dt:.1f}s z{seg.max():+.1f}")
+        print(f"  window {w_s:g} s: best phase {best * dt:6.1f} s, significance {(s[best] - s0) / ssig:5.1f} sigma "
+              f"(next separate phase {second:.1f}); per-period peaks: " + "; ".join(hits))
 
 
 if __name__ == "__main__":
